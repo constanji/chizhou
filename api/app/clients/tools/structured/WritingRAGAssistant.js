@@ -12,10 +12,29 @@ try {
   try {
     KnowledgeType = require('@aipyq/data-schemas/schema/knowledgeBase').KnowledgeType;
   } catch (e) {
-    KnowledgeType = require('../../../../packages/data-schemas/src/schema/knowledgeBase').KnowledgeType;
+    try {
+      KnowledgeType = require('../../../../packages/data-schemas/src/schema/knowledgeBase').KnowledgeType;
+    } catch (e2) {
+      // 回退定义
+      KnowledgeType = {
+        SEMANTIC_MODEL: 'semantic_model',
+        QA_PAIR: 'qa_pair',
+        SYNONYM: 'synonym',
+        BUSINESS_KNOWLEDGE: 'business_knowledge',
+        FILE: 'file',
+      };
+    }
   }
 } catch (error) {
   logger.warn('[WritingRAGAssistant] RAG服务未找到，部分功能将不可用:', error.message);
+  // 即使 RAG 服务加载失败，也提供 KnowledgeType 回退定义
+  KnowledgeType = KnowledgeType || {
+    SEMANTIC_MODEL: 'semantic_model',
+    QA_PAIR: 'qa_pair',
+    SYNONYM: 'synonym',
+    BUSINESS_KNOWLEDGE: 'business_knowledge',
+    FILE: 'file',
+  };
 }
 
 /**
