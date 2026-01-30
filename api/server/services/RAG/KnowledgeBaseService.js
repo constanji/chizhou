@@ -1428,7 +1428,8 @@ class KnowledgeBaseService {
       const fileId = entry.metadata?.file_id;
       let embedding = entry.embedding; // 保留原有 embedding
 
-      if (!fileId && content) {
+      // 只在提供了 content 且没有关联文件时才重新生成 embedding
+      if (!fileId && content !== undefined && content !== null) {
         // 重新生成向量嵌入
         try {
           embedding = await this.embeddingService.embedText(content, userId);
@@ -1437,14 +1438,26 @@ class KnowledgeBaseService {
         }
       }
 
-      entry.title = title;
-      entry.content = content || entry.content;
-      entry.embedding = embedding;
-      entry.metadata = {
-        ...entry.metadata,
-        category,
-        tags: tags || [],
-      };
+      // 只在提供了相应字段时才更新，避免覆盖必需字段
+      if (title !== undefined && title !== null) {
+        entry.title = title;
+      }
+      if (content !== undefined && content !== null) {
+        entry.content = content;
+      }
+      if (embedding) {
+        entry.embedding = embedding;
+      }
+      
+      // 更新 metadata，只更新提供的字段
+      if (category !== undefined || tags !== undefined) {
+        entry.metadata = {
+          ...entry.metadata,
+          ...(category !== undefined && { category }),
+          ...(tags !== undefined && { tags }),
+        };
+      }
+      
       entry.updatedAt = new Date();
 
       await entry.save();
