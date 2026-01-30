@@ -401,6 +401,7 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
               <OGDialogContent
                 title="文件内容"
                 className="w-11/12 max-w-4xl bg-background text-text-primary shadow-2xl"
+                showCloseButton={false}
               >
                 <OGDialogHeader>
                   <div className="flex items-center justify-between">
