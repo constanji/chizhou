@@ -105,3 +105,19 @@ export const useCodeOutputDownload = (url = ''): QueryObserverResult<string> => 
     },
   );
 };
+
+export const useFileContent = (userId?: string, file_id?: string): QueryObserverResult<{ content: string; filename: string; type: string; size: number }> => {
+  return useQuery(
+    ['fileContent', file_id],
+    async () => {
+      if (!userId || !file_id) {
+        throw new Error('User ID and file ID are required');
+      }
+      return dataService.getFileContent(userId, file_id);
+    },
+    {
+      enabled: false,
+      retry: false,
+    },
+  );
+};

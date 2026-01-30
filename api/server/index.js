@@ -29,6 +29,7 @@ const staticCache = require('./utils/staticCache');
 const noIndex = require('./middleware/noIndex');
 const { seedDatabase } = require('~/models');
 const routes = require('./routes');
+const VectorDBService = require('./services/RAG/VectorDBService');
 
 const { PORT, HOST, ALLOW_SOCIAL_LOGIN, DISABLE_COMPRESSION, TRUST_PROXY } = process.env ?? {};
 
@@ -58,6 +59,19 @@ const startServer = async () => {
   initializeFileStorage(appConfig);
   await performStartupChecks(appConfig);
   await updateInterfacePermissions(appConfig);
+
+  // 初始化向量数据库（如果启用）
+  if (process.env.USE_VECTOR_DB === 'true' || process.env.VECTOR_DB_HOST) {
+    try {
+      logger.info('[Server] 初始化向量数据库...');
+      const vectorDBService = new VectorDBService();
+      await vectorDBService.initialize();
+      logger.info('[Server] 向量数据库初始化成功');
+    } catch (error) {
+      logger.warn('[Server] 向量数据库初始化失败（将在首次使用时重试）:', error.message);
+      // 不阻止服务器启动，允许后续重试
+    }
+  }
 
   const indexPath = path.join(appConfig.paths.dist, 'index.html');
   if (!fs.existsSync(indexPath)) {

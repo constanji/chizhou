@@ -25,8 +25,9 @@ services:
       - MONGO_URI=mongodb://mongodb:27017/Chizhou
       - MEILI_HOST=http://meilisearch:7700
       - CONFIG_PATH=/app/Chizhou.yaml
+      # 向量数据库配置（必须在 environment 中显式设置，env_file 可能不会覆盖）
       - VECTOR_DB_HOST=vectordb
-      - VECTOR_DB_PORT=5432  # Docker容器内端口，外部访问使用5234
+      - VECTOR_DB_PORT=5432
       - VECTOR_DB_NAME=Chizhou
       - VECTOR_DB_USER=Chizhou
       - VECTOR_DB_PASSWORD=Chizhou

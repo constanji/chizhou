@@ -26,38 +26,52 @@ class VectorDBService {
   constructor() {
     this.pool = null;
     this.initialized = false;
+    this.tablesInitialized = false; // 标记表是否已初始化
     
-    // 自动检测运行环境并设置默认连接信息
+    // 从环境变量或配置获取连接信息（优先级：VECTOR_DB_* > POSTGRES_* > 默认值）
+    const envHost = process.env.VECTOR_DB_HOST || process.env.DB_HOST;
+    const envPort = process.env.VECTOR_DB_PORT || process.env.DB_PORT;
+    const envDatabase = process.env.VECTOR_DB_NAME || process.env.POSTGRES_DB;
+    const envUser = process.env.VECTOR_DB_USER || process.env.POSTGRES_USER;
+    const envPassword = process.env.VECTOR_DB_PASSWORD || process.env.POSTGRES_PASSWORD;
+    
+    // 如果环境变量未设置，根据运行环境设置默认值
     let defaultHost = 'vectordb';
     let defaultPort = 5432;
+    let defaultDatabase = 'mydatabase';
+    let defaultUser = 'myuser';
+    let defaultPassword = 'mypassword';
     
-    // 如果未显式设置环境变量，根据运行环境自动选择
-    if (!process.env.VECTOR_DB_HOST && !process.env.DB_HOST) {
+    if (!envHost && !envPort && !envDatabase && !envUser && !envPassword) {
+      // 只有在所有环境变量都未设置时才使用默认值
       if (!isRunningInDocker()) {
         // 在本地开发环境：使用 localhost 和映射的端口
         defaultHost = 'localhost';
-        defaultPort = parseInt(process.env.VECTOR_DB_PORT || process.env.DB_PORT || '5434', 10);
-        logger.debug('[VectorDBService] 检测到本地开发环境，使用 localhost:5434 连接向量数据库');
+        defaultPort = 5234; // 本地开发使用映射端口 5234
+        defaultDatabase = 'Chizhou';
+        defaultUser = 'Chizhou';
+        defaultPassword = 'Chizhou';
+        logger.debug('[VectorDBService] 检测到本地开发环境，使用默认配置: localhost:5234/Chizhou');
       } else {
         // 在 Docker 容器内：使用容器网络内的主机名
         defaultHost = 'vectordb';
         defaultPort = 5432;
-        logger.debug('[VectorDBService] 检测到 Docker 容器环境，使用 vectordb:5432 连接向量数据库');
+        defaultDatabase = 'Chizhou';
+        defaultUser = 'Chizhou';
+        defaultPassword = 'Chizhou';
+        logger.debug('[VectorDBService] 检测到 Docker 容器环境，使用默认配置: vectordb:5432/Chizhou');
       }
     }
     
-    // 从环境变量或配置获取连接信息
     this.config = {
-      host: process.env.VECTOR_DB_HOST || process.env.DB_HOST || defaultHost,
-      port: parseInt(process.env.VECTOR_DB_PORT || process.env.DB_PORT || defaultPort.toString(), 10),
-      database: process.env.VECTOR_DB_NAME || process.env.POSTGRES_DB || 'mydatabase',
-      user: process.env.VECTOR_DB_USER || process.env.POSTGRES_USER || 'myuser',
-      password: process.env.VECTOR_DB_PASSWORD || process.env.POSTGRES_PASSWORD || 'mypassword',
+      host: envHost || defaultHost,
+      port: parseInt(envPort || defaultPort.toString(), 10),
+      database: envDatabase || defaultDatabase,
+      user: envUser || defaultUser,
+      password: envPassword || defaultPassword,
       embeddingDimension: EMBEDDING_DIMENSION, // 向量维度
     };
     
-    logger.info(`[VectorDBService] 向量数据库连接配置: ${this.config.host}:${this.config.port}/${this.config.database}`);
-    logger.info(`[VectorDBService] Embedding 维度: ${this.config.embeddingDimension} (可通过 EMBEDDING_DIMENSION 环境变量配置)`);
   }
 
   /**
@@ -88,24 +102,63 @@ class VectorDBService {
         password: this.config.password,
         max: 20, // 最大连接数
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 2000,
+        connectionTimeoutMillis: 10000, // 增加到 10 秒，给数据库更多时间准备
       });
 
-      // 测试连接
-      const client = await this.pool.connect();
-      await client.query('SELECT 1');
-      client.release();
+      // 添加连接错误处理
+      this.pool.on('error', (err) => {
+        logger.error('[VectorDBService] Unexpected error on idle client:', err);
+        this.initialized = false; // 标记为未初始化，下次会重试
+      });
+
+      // 测试连接（带重试机制）
+      let retries = 3;
+      let lastError;
+      while (retries > 0) {
+        try {
+          const client = await this.pool.connect();
+          await client.query('SELECT 1');
+          client.release();
+          break; // 连接成功，跳出重试循环
+        } catch (error) {
+          lastError = error;
+          retries--;
+          if (retries > 0) {
+            logger.warn(`[VectorDBService] 连接失败，${retries} 次重试剩余... 错误: ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, 2000)); // 等待 2 秒后重试
+          }
+        }
+      }
+
+      if (retries === 0 && lastError) {
+        const errorDetails = {
+          message: lastError.message,
+          code: lastError.code,
+          host: this.config.host,
+          port: this.config.port,
+          database: this.config.database,
+          user: this.config.user,
+        };
+        logger.error('[VectorDBService] 连接失败详情:', JSON.stringify(errorDetails, null, 2));
+        throw new Error(`无法连接到向量数据库 ${this.config.host}:${this.config.port}/${this.config.database}。错误: ${lastError.message} (代码: ${lastError.code || 'N/A'})`);
+      }
 
       // 确保 pgvector 扩展已启用
       await this.ensureExtension();
 
-      // 确保表结构存在
-      await this.ensureTables();
+      // 确保表结构存在（只在首次初始化时创建）
+      if (!this.tablesInitialized) {
+        await this.ensureTables();
+        this.tablesInitialized = true;
+      }
 
       this.initialized = true;
       logger.info('[VectorDBService] Vector database connection initialized successfully');
     } catch (error) {
       logger.error('[VectorDBService] Failed to initialize vector database:', error);
+      logger.error(`[VectorDBService] 连接配置: ${this.config.host}:${this.config.port}/${this.config.database}, user: ${this.config.user}`);
+      // 不立即抛出错误，允许后续重试
+      this.initialized = false;
       throw error;
     }
   }
@@ -125,14 +178,42 @@ class VectorDBService {
   /**
    * 确保表结构存在
    * 按照 DAT 系统架构，为每种知识类型创建独立的表（独立存储空间）
+   * 优化：先检查表是否存在，只创建缺失的表
    */
   async ensureTables() {
     try {
       const embeddingDim = this.config.embeddingDimension;
       
+      // 先检查哪些表已存在
+      const expectedTables = [
+        'semantic_model_vectors',
+        'qa_pair_vectors',
+        'synonym_vectors',
+        'business_knowledge_vectors',
+        'file_vectors',
+      ];
+      
+      const tablesResult = await this.pool.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = ANY($1::text[])
+      `, [expectedTables]);
+      
+      const existingTables = new Set(tablesResult.rows.map(r => r.table_name));
+      const missingTables = expectedTables.filter(t => !existingTables.has(t));
+      
+      if (missingTables.length === 0) {
+        logger.debug('[VectorDBService] 所有表已存在，跳过创建');
+        return;
+      }
+      
+      logger.info(`[VectorDBService] 开始创建缺失的表结构（${missingTables.length} 个），向量维度: ${embeddingDim}`);
+      
       // 按照 DAT 系统架构，创建四种独立的向量存储表
       // 1. 语义模型向量表 (MDL - Model Definition Language)
-      await this.pool.query(`
+      if (missingTables.includes('semantic_model_vectors')) {
+        await this.pool.query(`
         CREATE TABLE IF NOT EXISTS semantic_model_vectors (
           id SERIAL PRIMARY KEY,
           knowledge_entry_id VARCHAR(255) UNIQUE NOT NULL,
@@ -144,9 +225,11 @@ class VectorDBService {
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      }
 
       // 2. QA对向量表 (SQL - Question-SQL Pair)
-      await this.pool.query(`
+      if (missingTables.includes('qa_pair_vectors')) {
+        await this.pool.query(`
         CREATE TABLE IF NOT EXISTS qa_pair_vectors (
           id SERIAL PRIMARY KEY,
           knowledge_entry_id VARCHAR(255) UNIQUE NOT NULL,
@@ -158,9 +241,11 @@ class VectorDBService {
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      }
 
       // 3. 同义词向量表 (SYN - Synonym Pair)
-      await this.pool.query(`
+      if (missingTables.includes('synonym_vectors')) {
+        await this.pool.query(`
         CREATE TABLE IF NOT EXISTS synonym_vectors (
           id SERIAL PRIMARY KEY,
           knowledge_entry_id VARCHAR(255) UNIQUE NOT NULL,
@@ -172,9 +257,11 @@ class VectorDBService {
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      }
 
       // 4. 业务知识向量表 (DOC - Document)
-      await this.pool.query(`
+      if (missingTables.includes('business_knowledge_vectors')) {
+        await this.pool.query(`
         CREATE TABLE IF NOT EXISTS business_knowledge_vectors (
           id SERIAL PRIMARY KEY,
           knowledge_entry_id VARCHAR(255) UNIQUE NOT NULL,
@@ -186,8 +273,10 @@ class VectorDBService {
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      }
 
-      // 为每个表创建用户索引
+      // 为每个表创建用户索引（使用 IF NOT EXISTS，即使表已存在也不会报错）
+      // 索引创建使用 IF NOT EXISTS，可以安全地重复执行
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_semantic_model_vectors_user_id 
         ON semantic_model_vectors(user_id)
@@ -232,7 +321,8 @@ class VectorDBService {
       `);
 
       // 创建文件向量表（兼容现有文件向量化）
-      await this.pool.query(`
+      if (missingTables.includes('file_vectors')) {
+        await this.pool.query(`
         CREATE TABLE IF NOT EXISTS file_vectors (
           id SERIAL PRIMARY KEY,
           file_id VARCHAR(255) NOT NULL,
@@ -245,8 +335,9 @@ class VectorDBService {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      }
 
-      // 创建文件向量索引
+      // 创建文件向量索引（使用 IF NOT EXISTS，可以安全地重复执行）
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_file_vectors_file_id 
         ON file_vectors(file_id)
@@ -259,9 +350,30 @@ class VectorDBService {
         WITH (m = 16, ef_construction = 64)
       `);
 
-      logger.debug('[VectorDBService] Database tables and indexes created (DAT architecture: independent tables per type)');
+      if (missingTables.length > 0) {
+        logger.info(`[VectorDBService] 表结构初始化完成: 创建了 ${missingTables.length} 个缺失的表 (${missingTables.join(', ')})`);
+        
+        // 验证新创建的表是否真的创建成功
+        const verifyResult = await this.pool.query(`
+          SELECT table_name 
+          FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = ANY($1::text[])
+        `, [missingTables]);
+        const createdTables = verifyResult.rows.map(r => r.table_name);
+        
+        if (createdTables.length !== missingTables.length) {
+          const failedTables = missingTables.filter(t => !createdTables.includes(t));
+          logger.warn(`[VectorDBService] 部分表创建失败: ${failedTables.join(', ')}`);
+        } else {
+          logger.debug(`[VectorDBService] 验证: 所有缺失的表都已成功创建`);
+        }
+      } else {
+        logger.debug(`[VectorDBService] 所有表已存在，无需创建`);
+      }
     } catch (error) {
       logger.error('[VectorDBService] Failed to create tables:', error);
+      logger.error('[VectorDBService] 错误堆栈:', error.stack);
       throw error;
     }
   }
@@ -337,7 +449,7 @@ class VectorDBService {
            embedding = EXCLUDED.embedding::vector,
            metadata = EXCLUDED.metadata::jsonb,
            updated_at = CURRENT_TIMESTAMP`,
-        [knowledgeEntryId, userId, content, embeddingStr, JSON.stringify(metadata)]
+        [knowledgeEntryId, userId, content, embeddingStr, metadata] // 直接传递对象，pg 驱动会自动转换为 JSONB
       );
 
       logger.debug(`[VectorDBService] Stored vector for ${type} in table ${tableName}: ${knowledgeEntryId}`);
@@ -683,6 +795,117 @@ class VectorDBService {
       }
     } catch (error) {
       logger.error('[VectorDBService] Failed to delete knowledge vector:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 存储文件向量
+   * 将文件内容分块后向量化并存储到 file_vectors 表
+   * 
+   * @param {Object} params
+   * @param {string} params.fileId - 文件ID
+   * @param {string} params.userId - 用户ID（用于数据隔离）
+   * @param {string} [params.entityId] - 实体ID（数据源隔离，可选）
+   * @param {Array<{text: string, metadata: Object}>} params.chunks - 文本块数组
+   * @param {number[]} params.embeddings - 每个块的向量嵌入数组
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async storeFileVectors({ fileId, userId, entityId, chunks, embeddings }) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      if (!chunks || chunks.length === 0) {
+        logger.warn('[VectorDBService] 没有文本块需要存储');
+        return false;
+      }
+
+      if (chunks.length !== embeddings.length) {
+        throw new Error(`文本块数量(${chunks.length})与向量数量(${embeddings.length})不匹配`);
+      }
+
+      // 先删除该文件的旧向量（如果存在）
+      await this.pool.query(
+        'DELETE FROM file_vectors WHERE file_id = $1',
+        [fileId]
+      );
+
+      // 批量插入文件向量
+      const insertPromises = chunks.map(async (chunk, index) => {
+        const embedding = embeddings[index];
+        if (!embedding || !Array.isArray(embedding)) {
+          logger.warn(`[VectorDBService] 跳过无效的向量: chunk ${index}`);
+          return;
+        }
+
+        const actualDimension = embedding.length;
+        const expectedDimension = this.config.embeddingDimension;
+        
+        if (actualDimension !== expectedDimension) {
+          logger.warn(`[VectorDBService] 向量维度不匹配: chunk ${index}, got ${actualDimension}, expected ${expectedDimension}`);
+          return;
+        }
+
+        const embeddingStr = `[${embedding.join(',')}]`;
+        // 修复文件名编码问题
+        const { fixFilenameEncoding } = require('~/server/utils/files');
+        const filename = fixFilenameEncoding(
+          chunk.metadata?.filename || chunk.metadata?.source?.split('/').pop() || ''
+        );
+        const metadata = {
+          ...chunk.metadata,
+          entity_id: entityId,
+          filename: filename,
+        };
+
+        // 直接传递 JavaScript 对象给 pg 驱动，让它自动处理 JSONB 转换
+        // 这样可以避免 Unicode 转义序列的问题
+        await this.pool.query(
+          `INSERT INTO file_vectors 
+           (file_id, user_id, entity_id, chunk_index, content, embedding, metadata)
+           VALUES ($1, $2, $3, $4, $5, $6::vector, $7::jsonb)`,
+          [
+            fileId,
+            userId,
+            entityId || null,
+            index,
+            chunk.text,
+            embeddingStr,
+            metadata, // 直接传递对象，pg 驱动会自动转换为 JSONB
+          ]
+        );
+      });
+
+      await Promise.all(insertPromises);
+      logger.info(`[VectorDBService] 成功存储 ${chunks.length} 个文件向量块到 file_vectors 表: fileId=${fileId}`);
+      return true;
+    } catch (error) {
+      logger.error('[VectorDBService] 存储文件向量失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 删除文件向量
+   * @param {string} fileId - 文件ID
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async deleteFileVectors(fileId) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      const result = await this.pool.query(
+        'DELETE FROM file_vectors WHERE file_id = $1',
+        [fileId]
+      );
+      logger.info(`[VectorDBService] 删除文件向量: fileId=${fileId}, 删除 ${result.rowCount} 条记录`);
+      return result.rowCount > 0;
+    } catch (error) {
+      logger.error('[VectorDBService] 删除文件向量失败:', error);
       throw error;
     }
   }

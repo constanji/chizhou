@@ -12,7 +12,7 @@ pids
 *.pid
 *.seed
 .git
-# 仅忽略项目根目录的 utils/，避免误忽略 client/src/utils/ 等
+
 /utils/
 !/utils/docker/
 # CI/CD data
@@ -170,13 +170,5 @@ coordination/orchestration/*
 claude-flow
 
 # Deployment unnecessary folders
-
-# ONNX model files (large files, should be downloaded on first use)
-*.onnx
-# Keep model config files but ignore the actual model binaries
-!api/server/services/RAG/onnx/**/config.json
-!api/server/services/RAG/onnx/**/tokenizer*.json
-!api/server/services/RAG/onnx/**/special_tokens_map.json
-!api/server/services/RAG/onnx/**/README
 
 
