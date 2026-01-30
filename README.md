@@ -115,22 +115,29 @@
     npm run build:dev     # 生成 dist/esm 和 dist/cjs
     ```
 
-4. **构建前端**
+4. **构建前端（后端以生产模式提供前端时必须先构建）**
    ```bash
+   # 方式 A：根目录一键构建（推荐）
+   npm run build:client
+   
+   # 方式 B：分步构建
    cd client
    npm run build
    cd ..
    ```
+   构建产物在 `client/dist/`，后端会读取其中的 `index.html`。若未构建就启动后端，会报错并提示先执行上述命令。
 
-5. **配置环境变量**
+5. **配置环境变量与配置文件**
    ```bash
    cp .env.example .env
-   cp Chizhou.yaml.example Chizhou.yaml
-   # 按需编辑 .env，配置数据库、密钥等
-   # 确保 .env 中包含以下配置（用于本地开发）：
-   # MONGO_URI=mongodb://localhost:27017/Chizhou
-   # MEILI_HOST=http://localhost:7700
+   # 本项目默认使用 Chizhou.yaml（无则从示例复制）
+   cp Aipyq.yaml.example Chizhou.yaml
+   # 按需编辑 .env 和 Chizhou.yaml
+   # 本地开发时 .env 建议包含：
+   # MONGO_URI=mongodb://localhost:27027/Chizhou
+   # MEILI_HOST=http://localhost:7700（若 SEARCH=true）
    ```
+   **说明**：后端默认读取项目根目录的 `Chizhou.yaml`；若需改用其他路径，可设置环境变量 `CONFIG_PATH`。
 
 6. **启动数据库服务（必须）**
    ```bash

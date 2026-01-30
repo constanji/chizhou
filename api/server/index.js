@@ -60,6 +60,12 @@ const startServer = async () => {
   await updateInterfacePermissions(appConfig);
 
   const indexPath = path.join(appConfig.paths.dist, 'index.html');
+  if (!fs.existsSync(indexPath)) {
+    logger.error(
+      `前端构建产物不存在: ${indexPath}\n请先在项目根目录执行完整的前端构建：\n  npm run frontend\n或者分步执行：\n  npm run build:packages && npm run build:agents && npm run build:client`,
+    );
+    throw new Error('Missing client/dist/index.html. Run frontend build first.');
+  }
   let indexHTML = fs.readFileSync(indexPath, 'utf8');
 
   // In order to provide support to serving the application in a sub-directory
