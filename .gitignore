@@ -6,7 +6,7 @@ meili_data*
 data/
 logs
 *.log
-
+BecauseCha
 # Runtime data
 pids
 *.pid
