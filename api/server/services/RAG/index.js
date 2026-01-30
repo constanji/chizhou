@@ -4,6 +4,7 @@ const KnowledgeBaseService = require('./KnowledgeBaseService');
 const RetrievalService = require('./RetrievalService');
 const RerankingService = require('./RerankingService');
 const VectorDBService = require('./VectorDBService');
+const ConversationRAGService = require('./ConversationRAGService');
 
 module.exports = {
   RAGService,
@@ -12,5 +13,6 @@ module.exports = {
   RetrievalService,
   RerankingService,
   VectorDBService,
+  ConversationRAGService,
 };
 

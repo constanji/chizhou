@@ -186,10 +186,6 @@ class VectorDBService {
       
       // 先检查哪些表已存在
       const expectedTables = [
-        'semantic_model_vectors',
-        'qa_pair_vectors',
-        'synonym_vectors',
-        'business_knowledge_vectors',
         'file_vectors',
       ];
       
@@ -209,116 +205,6 @@ class VectorDBService {
       }
       
       logger.info(`[VectorDBService] 开始创建缺失的表结构（${missingTables.length} 个），向量维度: ${embeddingDim}`);
-      
-      // 按照 DAT 系统架构，创建四种独立的向量存储表
-      // 1. 语义模型向量表 (MDL - Model Definition Language)
-      if (missingTables.includes('semantic_model_vectors')) {
-        await this.pool.query(`
-        CREATE TABLE IF NOT EXISTS semantic_model_vectors (
-          id SERIAL PRIMARY KEY,
-          knowledge_entry_id VARCHAR(255) UNIQUE NOT NULL,
-          user_id VARCHAR(255) NOT NULL,
-          content TEXT NOT NULL,
-          embedding vector(${embeddingDim}),
-          metadata JSONB DEFAULT '{}'::jsonb,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-      }
-
-      // 2. QA对向量表 (SQL - Question-SQL Pair)
-      if (missingTables.includes('qa_pair_vectors')) {
-        await this.pool.query(`
-        CREATE TABLE IF NOT EXISTS qa_pair_vectors (
-          id SERIAL PRIMARY KEY,
-          knowledge_entry_id VARCHAR(255) UNIQUE NOT NULL,
-          user_id VARCHAR(255) NOT NULL,
-          content TEXT NOT NULL,
-          embedding vector(${embeddingDim}),
-          metadata JSONB DEFAULT '{}'::jsonb,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-      }
-
-      // 3. 同义词向量表 (SYN - Synonym Pair)
-      if (missingTables.includes('synonym_vectors')) {
-        await this.pool.query(`
-        CREATE TABLE IF NOT EXISTS synonym_vectors (
-          id SERIAL PRIMARY KEY,
-          knowledge_entry_id VARCHAR(255) UNIQUE NOT NULL,
-          user_id VARCHAR(255) NOT NULL,
-          content TEXT NOT NULL,
-          embedding vector(${embeddingDim}),
-          metadata JSONB DEFAULT '{}'::jsonb,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-      }
-
-      // 4. 业务知识向量表 (DOC - Document)
-      if (missingTables.includes('business_knowledge_vectors')) {
-        await this.pool.query(`
-        CREATE TABLE IF NOT EXISTS business_knowledge_vectors (
-          id SERIAL PRIMARY KEY,
-          knowledge_entry_id VARCHAR(255) UNIQUE NOT NULL,
-          user_id VARCHAR(255) NOT NULL,
-          content TEXT NOT NULL,
-          embedding vector(${embeddingDim}),
-          metadata JSONB DEFAULT '{}'::jsonb,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-      }
-
-      // 为每个表创建用户索引（使用 IF NOT EXISTS，即使表已存在也不会报错）
-      // 索引创建使用 IF NOT EXISTS，可以安全地重复执行
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_semantic_model_vectors_user_id 
-        ON semantic_model_vectors(user_id)
-      `);
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_qa_pair_vectors_user_id 
-        ON qa_pair_vectors(user_id)
-      `);
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_synonym_vectors_user_id 
-        ON synonym_vectors(user_id)
-      `);
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_business_knowledge_vectors_user_id 
-        ON business_knowledge_vectors(user_id)
-      `);
-
-      // 为每个表创建向量相似度搜索索引（使用 HNSW）
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_semantic_model_vectors_embedding_hnsw 
-        ON semantic_model_vectors 
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64)
-      `);
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_qa_pair_vectors_embedding_hnsw 
-        ON qa_pair_vectors 
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64)
-      `);
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_synonym_vectors_embedding_hnsw 
-        ON synonym_vectors 
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64)
-      `);
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_business_knowledge_vectors_embedding_hnsw 
-        ON business_knowledge_vectors 
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64)
-      `);
 
       // 创建文件向量表（兼容现有文件向量化）
       if (missingTables.includes('file_vectors')) {
@@ -386,10 +272,7 @@ class VectorDBService {
    */
   getTableName(type) {
     const tableMap = {
-      semantic_model: 'semantic_model_vectors',
-      qa_pair: 'qa_pair_vectors',
-      synonym: 'synonym_vectors',
-      business_knowledge: 'business_knowledge_vectors',
+      file_vectors: "file_vectors",
     };
     return tableMap[type] || null;
   }
@@ -705,7 +588,7 @@ class VectorDBService {
     }
 
     try {
-      const allTypes = ['semantic_model', 'qa_pair', 'synonym', 'business_knowledge'];
+      const allTypes = ["file_vectors"];
       const searchTypes = types && types.length > 0 ? types : allTypes;
       const isolationInfo = entityId ? `, entityId: ${entityId} (数据源隔离, 类型: ${typeof entityId})` : ' (无数据源隔离)';
       logger.info(`[VectorDBService] 开始向量相似度搜索 (类型数: ${searchTypes.length}, topK: ${topK}, minScore: ${minScore})${isolationInfo}`);
@@ -780,7 +663,7 @@ class VectorDBService {
         return result.rowCount > 0;
       } else {
         // 从所有表中删除（用于兼容性）
-        const allTypes = ['semantic_model', 'qa_pair', 'synonym', 'business_knowledge'];
+        const allTypes = ["file_vectors"];
         let deleted = false;
 
         for (const t of allTypes) {
