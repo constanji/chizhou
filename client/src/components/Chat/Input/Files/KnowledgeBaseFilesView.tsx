@@ -231,6 +231,22 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
 
   const files = knowledgeList?.data || [];
   
+  // 调试日志
+  useEffect(() => {
+    if (knowledgeList) {
+      console.log('[KnowledgeBaseFilesView] 知识库数据:', {
+        success: knowledgeList.success,
+        count: knowledgeList.count,
+        dataLength: knowledgeList.data?.length || 0,
+        isLoading,
+        error: knowledgeList.error,
+      });
+      if (knowledgeList.data && knowledgeList.data.length > 0) {
+        console.log('[KnowledgeBaseFilesView] 第一条数据:', knowledgeList.data[0]);
+      }
+    }
+  }, [knowledgeList, isLoading]);
+  
   // 按分类分组文件
   const groupedFiles = files.reduce((acc, entry) => {
     const category = entry.metadata?.category || '未分类';

@@ -1741,21 +1741,21 @@ class KnowledgeBaseService {
         .skip(skip)
         .lean();
 
-      logger.info(`[KnowledgeBaseService] 查询父级结果: ${entries.length} 条，includeChildren: ${includeChildren}, type: ${type}, query: ${JSON.stringify(query)}`);
-      if (entries.length > 0 && type === 'semantic_model') {
+      logger.info(`[KnowledgeBaseService] 查询父级结果: ${entries.length} 条，includeChildren: ${includeChildren}, type: ${type}, userId: ${userId || '未提供'}, query: ${JSON.stringify(query)}`);
+      if (entries.length > 0 && (type === 'semantic_model' || type === 'business_knowledge')) {
         entries.forEach((entry, index) => {
-          logger.info(`[KnowledgeBaseService] 父级条目 ${index + 1}: _id=${entry._id}, parent_id=${entry.parent_id || 'null'}, title=${entry.title}`);
+          logger.info(`[KnowledgeBaseService] 父级条目 ${index + 1}: _id=${entry._id}, parent_id=${entry.parent_id || 'null'}, title=${entry.title}, user=${entry.user}`);
         });
-      } else if (entries.length === 0 && type === 'semantic_model') {
+      } else if (entries.length === 0 && (type === 'semantic_model' || type === 'business_knowledge')) {
         // 如果查询结果为空，尝试查询所有条目看看是否有数据
         const allEntriesQuery = { type: type };
         if (userId) {
           allEntriesQuery.user = userId;
         }
         const allEntries = await KnowledgeEntry.find(allEntriesQuery).limit(5).lean();
-        logger.warn(`[KnowledgeBaseService] 查询父级结果为空，但数据库中有 ${allEntries.length} 条语义模型条目（前5条）`);
+        logger.warn(`[KnowledgeBaseService] 查询父级结果为空，但数据库中有 ${allEntries.length} 条${type}条目（前5条）`);
         allEntries.forEach((entry, index) => {
-          logger.warn(`[KnowledgeBaseService] 条目 ${index + 1}: _id=${entry._id}, parent_id=${entry.parent_id || 'null'}, title=${entry.title}`);
+          logger.warn(`[KnowledgeBaseService] 条目 ${index + 1}: _id=${entry._id}, parent_id=${entry.parent_id || 'null'}, title=${entry.title}, user=${entry.user}, type=${entry.type}`);
         });
       }
 
