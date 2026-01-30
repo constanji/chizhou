@@ -1,0 +1,643 @@
+{
+  "database": "mall_demo",
+  "generated_at": "2025-12-23T09:00:29.904Z",
+  "semantic_models": [
+    {
+      "name": "customer_addresses",
+      "description": "数据库表: customer_addresses",
+      "model": "customer_addresses",
+      "columns": [
+        {
+          "name": "address_id",
+          "type": "bigint",
+          "nullable": false,
+          "key": "PRI",
+          "comment": "地址ID",
+          "default": null
+        },
+        {
+          "name": "customer_id",
+          "type": "int",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "关联客户ID",
+          "default": null
+        },
+        {
+          "name": "province",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "省份",
+          "default": null
+        },
+        {
+          "name": "city",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "城市",
+          "default": null
+        },
+        {
+          "name": "district",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "区县",
+          "default": null
+        },
+        {
+          "name": "detail_address",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "详细地址",
+          "default": null
+        },
+        {
+          "name": "is_default",
+          "type": "tinyint",
+          "nullable": true,
+          "key": "",
+          "comment": "是否默认地址",
+          "default": "0"
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "idx_cust_address",
+          "column_name": "customer_id",
+          "non_unique": 1
+        },
+        {
+          "index_name": "PRIMARY",
+          "column_name": "address_id",
+          "non_unique": 0
+        }
+      ]
+    },
+    {
+      "name": "customers",
+      "description": "数据库表: customers",
+      "model": "customers",
+      "columns": [
+        {
+          "name": "customer_id",
+          "type": "int",
+          "nullable": false,
+          "key": "PRI",
+          "comment": "客户ID",
+          "default": null
+        },
+        {
+          "name": "customer_name",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "客户真实姓名",
+          "default": null
+        },
+        {
+          "name": "phone",
+          "type": "varchar",
+          "nullable": true,
+          "key": "UNI",
+          "comment": "手机号",
+          "default": null
+        },
+        {
+          "name": "email",
+          "type": "varchar",
+          "nullable": true,
+          "key": "UNI",
+          "comment": "邮箱",
+          "default": null
+        },
+        {
+          "name": "registration_date",
+          "type": "date",
+          "nullable": false,
+          "key": "",
+          "comment": "注册日期",
+          "default": null
+        },
+        {
+          "name": "segment",
+          "type": "enum",
+          "nullable": false,
+          "key": "",
+          "comment": "客户分层",
+          "default": null
+        },
+        {
+          "name": "gender",
+          "type": "enum",
+          "nullable": false,
+          "key": "",
+          "comment": "性别",
+          "default": null
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "email",
+          "column_name": "email",
+          "non_unique": 0
+        },
+        {
+          "index_name": "phone",
+          "column_name": "phone",
+          "non_unique": 0
+        },
+        {
+          "index_name": "PRIMARY",
+          "column_name": "customer_id",
+          "non_unique": 0
+        }
+      ]
+    },
+    {
+      "name": "inventory",
+      "description": "数据库表: inventory",
+      "model": "inventory",
+      "columns": [
+        {
+          "name": "inventory_id",
+          "type": "bigint",
+          "nullable": false,
+          "key": "PRI",
+          "comment": "库存ID",
+          "default": null
+        },
+        {
+          "name": "product_id",
+          "type": "int",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "关联产品ID",
+          "default": null
+        },
+        {
+          "name": "stock_quantity",
+          "type": "int",
+          "nullable": false,
+          "key": "",
+          "comment": "当前库存",
+          "default": "0"
+        },
+        {
+          "name": "low_stock_threshold",
+          "type": "int",
+          "nullable": false,
+          "key": "",
+          "comment": "低库存阈值",
+          "default": "10"
+        },
+        {
+          "name": "last_replenish_time",
+          "type": "datetime",
+          "nullable": true,
+          "key": "",
+          "comment": "最后补货时间",
+          "default": null
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "idx_prod_inventory",
+          "column_name": "product_id",
+          "non_unique": 1
+        },
+        {
+          "index_name": "PRIMARY",
+          "column_name": "inventory_id",
+          "non_unique": 0
+        }
+      ]
+    },
+    {
+      "name": "order_items",
+      "description": "数据库表: order_items",
+      "model": "order_items",
+      "columns": [
+        {
+          "name": "item_id",
+          "type": "bigint",
+          "nullable": false,
+          "key": "PRI",
+          "comment": "明细ID",
+          "default": null
+        },
+        {
+          "name": "order_id",
+          "type": "bigint",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "关联订单ID",
+          "default": null
+        },
+        {
+          "name": "product_id",
+          "type": "int",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "关联产品ID",
+          "default": null
+        },
+        {
+          "name": "quantity",
+          "type": "int",
+          "nullable": false,
+          "key": "",
+          "comment": "购买数量",
+          "default": null
+        },
+        {
+          "name": "price",
+          "type": "decimal",
+          "nullable": false,
+          "key": "",
+          "comment": "实际售价",
+          "default": null
+        },
+        {
+          "name": "subtotal",
+          "type": "decimal",
+          "nullable": true,
+          "key": "",
+          "comment": "明细小计",
+          "default": null
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "idx_item_order",
+          "column_name": "order_id",
+          "non_unique": 1
+        },
+        {
+          "index_name": "idx_item_product",
+          "column_name": "product_id",
+          "non_unique": 1
+        },
+        {
+          "index_name": "PRIMARY",
+          "column_name": "item_id",
+          "non_unique": 0
+        }
+      ]
+    },
+    {
+      "name": "orders",
+      "description": "数据库表: orders",
+      "model": "orders",
+      "columns": [
+        {
+          "name": "order_id",
+          "type": "bigint",
+          "nullable": false,
+          "key": "PRI",
+          "comment": "订单ID",
+          "default": null
+        },
+        {
+          "name": "customer_id",
+          "type": "int",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "关联客户ID",
+          "default": null
+        },
+        {
+          "name": "order_date",
+          "type": "datetime",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "下单时间",
+          "default": null
+        },
+        {
+          "name": "total_amount",
+          "type": "decimal",
+          "nullable": false,
+          "key": "",
+          "comment": "订单总金额",
+          "default": "0.00"
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "订单状态",
+          "default": null
+        },
+        {
+          "name": "shipping_fee",
+          "type": "decimal",
+          "nullable": true,
+          "key": "",
+          "comment": "运费",
+          "default": "0.00"
+        },
+        {
+          "name": "discount_amount",
+          "type": "decimal",
+          "nullable": true,
+          "key": "",
+          "comment": "优惠金额",
+          "default": "0.00"
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "idx_order_customer",
+          "column_name": "customer_id",
+          "non_unique": 1
+        },
+        {
+          "index_name": "idx_order_date",
+          "column_name": "order_date",
+          "non_unique": 1
+        },
+        {
+          "index_name": "idx_order_status",
+          "column_name": "status",
+          "non_unique": 1
+        },
+        {
+          "index_name": "PRIMARY",
+          "column_name": "order_id",
+          "non_unique": 0
+        }
+      ]
+    },
+    {
+      "name": "payments",
+      "description": "数据库表: payments",
+      "model": "payments",
+      "columns": [
+        {
+          "name": "payment_id",
+          "type": "bigint",
+          "nullable": false,
+          "key": "PRI",
+          "comment": "支付ID",
+          "default": null
+        },
+        {
+          "name": "order_id",
+          "type": "bigint",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "关联订单ID",
+          "default": null
+        },
+        {
+          "name": "payment_method",
+          "type": "enum",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "支付方式",
+          "default": null
+        },
+        {
+          "name": "payment_amount",
+          "type": "decimal",
+          "nullable": false,
+          "key": "",
+          "comment": "支付金额",
+          "default": null
+        },
+        {
+          "name": "payment_time",
+          "type": "datetime",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "支付时间",
+          "default": null
+        },
+        {
+          "name": "payment_status",
+          "type": "enum",
+          "nullable": false,
+          "key": "",
+          "comment": "支付状态",
+          "default": null
+        },
+        {
+          "name": "transaction_id",
+          "type": "varchar",
+          "nullable": true,
+          "key": "UNI",
+          "comment": "外部交易号",
+          "default": null
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "idx_payment_method",
+          "column_name": "payment_method",
+          "non_unique": 1
+        },
+        {
+          "index_name": "idx_payment_order",
+          "column_name": "order_id",
+          "non_unique": 1
+        },
+        {
+          "index_name": "idx_payment_time",
+          "column_name": "payment_time",
+          "non_unique": 1
+        },
+        {
+          "index_name": "PRIMARY",
+          "column_name": "payment_id",
+          "non_unique": 0
+        },
+        {
+          "index_name": "transaction_id",
+          "column_name": "transaction_id",
+          "non_unique": 0
+        }
+      ]
+    },
+    {
+      "name": "products",
+      "description": "数据库表: products",
+      "model": "products",
+      "columns": [
+        {
+          "name": "product_id",
+          "type": "int",
+          "nullable": false,
+          "key": "PRI",
+          "comment": "产品ID",
+          "default": null
+        },
+        {
+          "name": "product_name",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "产品名称",
+          "default": null
+        },
+        {
+          "name": "category",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "大类",
+          "default": null
+        },
+        {
+          "name": "sub_category",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "子类",
+          "default": null
+        },
+        {
+          "name": "brand",
+          "type": "varchar",
+          "nullable": false,
+          "key": "",
+          "comment": "品牌",
+          "default": null
+        },
+        {
+          "name": "price",
+          "type": "decimal",
+          "nullable": false,
+          "key": "",
+          "comment": "原价",
+          "default": null
+        },
+        {
+          "name": "cost_price",
+          "type": "decimal",
+          "nullable": false,
+          "key": "",
+          "comment": "成本价",
+          "default": null
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "nullable": true,
+          "key": "",
+          "comment": "产品状态",
+          "default": "在售"
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "PRIMARY",
+          "column_name": "product_id",
+          "non_unique": 0
+        }
+      ]
+    },
+    {
+      "name": "user_behavior",
+      "description": "数据库表: user_behavior",
+      "model": "user_behavior",
+      "columns": [
+        {
+          "name": "behavior_id",
+          "type": "bigint",
+          "nullable": false,
+          "key": "PRI",
+          "comment": "行为ID",
+          "default": null
+        },
+        {
+          "name": "customer_id",
+          "type": "int",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "关联客户ID",
+          "default": null
+        },
+        {
+          "name": "product_id",
+          "type": "int",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "关联产品ID",
+          "default": null
+        },
+        {
+          "name": "behavior_type",
+          "type": "enum",
+          "nullable": false,
+          "key": "MUL",
+          "comment": "行为类型",
+          "default": null
+        },
+        {
+          "name": "behavior_time",
+          "type": "datetime",
+          "nullable": false,
+          "key": "",
+          "comment": "行为时间",
+          "default": null
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "idx_behavior_customer",
+          "column_name": "customer_id",
+          "non_unique": 1
+        },
+        {
+          "index_name": "idx_behavior_product",
+          "column_name": "product_id",
+          "non_unique": 1
+        },
+        {
+          "index_name": "idx_behavior_type",
+          "column_name": "behavior_type",
+          "non_unique": 1
+        },
+        {
+          "index_name": "PRIMARY",
+          "column_name": "behavior_id",
+          "non_unique": 0
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "table": "all",
+    "user_input": {
+      "domain": "电商零售分析",
+      "database_name": "mall_demo",
+      "description": "基于mall_demo电商数据库的分析语义模型，专注于业务指标、分析维度和事实表设计，支持BI报表和数据分析",
+      "model_type": "分析语义模型",
+      "focus_areas": [
+        "销售分析指标",
+        "用户分析指标",
+        "商品分析指标",
+        "库存分析指标",
+        "转化率分析指标"
+      ],
+      "analysis_requirements": [
+        "支持多维度销售分析：时间、地域、商品类别、客户分层",
+        "支持用户行为漏斗分析：浏览->加购->购买转化",
+        "支持商品销售排行和库存周转分析",
+        "支持客户价值分析和RFM模型",
+        "支持支付渠道和订单状态分析"
+      ],
+      "target_users": [
+        "数据分析师",
+        "业务分析师",
+        "运营经理",
+        "产品经理"
+      ]
+    }
+  }
+}
