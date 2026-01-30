@@ -51,9 +51,11 @@ const query = async (req, res) => {
     res.json(result);
   } catch (error) {
     logger.error('[RAGController] 查询失败:', error);
+    logger.error('[RAGController] 错误堆栈:', error.stack);
     res.status(500).json({
       error: 'RAG查询失败',
-      message: error.message,
+      message: error.message || '未知错误',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
 };
@@ -136,12 +138,11 @@ const addKnowledgeBatch = async (req, res) => {
 /**
  * 获取知识条目列表控制器
  * GET /api/rag/knowledge
- * 支持共享知识库：不传递userId，允许所有用户查看所有知识条目（按entityId过滤）
+ * 按用户ID隔离，只返回当前用户的知识条目
  */
 const getKnowledgeList = async (req, res) => {
   try {
-    // 不传递userId，支持共享知识库
-    // 如果需要用户隔离，可以通过entityId进行数据源级别的隔离
+    const userId = req.user.id;
     const {
       type,
       entityId,
@@ -159,7 +160,7 @@ const getKnowledgeList = async (req, res) => {
     }
 
     const results = await ragService.getKnowledgeList({
-      userId: undefined, // 不传递userId，支持共享知识库
+      userId: userId, // 传递userId，实现用户隔离
       filters: {
         ...filters,
         includeChildren: includeChildren === 'true',

@@ -721,16 +721,23 @@ let KnowledgeEntry;
 try {
   const models = require('~/db/models');
   KnowledgeEntry = models.KnowledgeEntry;
-  if (!KnowledgeEntry) {
-    // 如果模型未导出，直接创建
-    const createdModels = createModels(mongoose);
-    KnowledgeEntry = createdModels.KnowledgeEntry;
-  }
 } catch (e) {
   // 如果从 db/models 导入失败，直接创建模型
-  const createdModels = createModels(mongoose);
-  KnowledgeEntry = createdModels.KnowledgeEntry;
+  logger.debug('[KnowledgeBaseService] 从 db/models 导入失败，尝试直接创建模型');
 }
+
+// 如果模型仍未定义，直接创建
+if (!KnowledgeEntry) {
+  try {
+    const createdModels = createModels(mongoose);
+    KnowledgeEntry = createdModels.KnowledgeEntry;
+  } catch (e) {
+    logger.debug('[KnowledgeBaseService] createModels 未包含 KnowledgeEntry，直接创建模型');
+  }
+}
+
+// 如果仍然未定义，且 MongoDB 已连接，直接创建模型 schema 和 model
+// 注意：模型创建会在第一次使用时延迟初始化（在 getKnowledgeEntries 方法中）
 // 从编译后的包中导入，或使用本地 JavaScript 文件
 let KnowledgeType;
 try {
@@ -1190,6 +1197,16 @@ class KnowledgeBaseService {
    */
   async addBusinessKnowledge({ userId, title, content, category, tags, entityId, fileId, filename }) {
     try {
+      // 修复文件名编码问题（multer 可能将 UTF-8 文件名错误地按 Latin1 解码）
+      const { fixFilenameEncoding } = require('~/server/utils/files');
+      const decodedFilename = filename ? fixFilenameEncoding(filename) : filename;
+      let decodedTitle = title ? fixFilenameEncoding(title) : title;
+      
+      // 如果 title 未提供或与 filename 相同，使用文件名作为 title
+      if (!decodedTitle && decodedFilename) {
+        decodedTitle = decodedFilename;
+      }
+
       // 如果有关联的文件，文件已经通过上传 API 向量化，不需要再次生成 embedding
       // 否则，为文本内容生成向量嵌入
       let embedding = null;
@@ -1207,15 +1224,15 @@ class KnowledgeBaseService {
       const knowledgeEntry = new KnowledgeEntry({
         user: userId,
         type: KnowledgeType.BUSINESS_KNOWLEDGE,
-        title,
-        content: content || (fileId ? `文档: ${filename || '已上传文档'}` : ''),
+        title: decodedTitle,
+        content: content || (fileId ? `文档: ${decodedFilename || '已上传文档'}` : ''),
         embedding,
         metadata: {
           category,
           tags: tags || [],
           entity_id: entityId,
           file_id: fileId, // 关联的文件ID
-          filename: filename, // 文件名
+          filename: decodedFilename, // 文件名（已解码）
         },
       });
 
@@ -1236,7 +1253,7 @@ class KnowledgeBaseService {
               tags: tags || [],
               entity_id: entityId,
               file_id: fileId,
-              filename: filename,
+              filename: decodedFilename, // 使用修复后的文件名
             },
           });
         } catch (vectorError) {
@@ -1244,7 +1261,16 @@ class KnowledgeBaseService {
         }
       }
 
-      logger.info(`[KnowledgeBaseService] 添加业务知识: ${title}${embedding ? ' (with embedding)' : ' (without embedding)'}`);
+      // 确保日志输出时文件名正确
+      const logTitle = decodedTitle || decodedFilename || '未知文件';
+      // 使用 Buffer 确保日志输出时编码正确
+      try {
+        const logTitleBuffer = Buffer.from(logTitle, 'utf8');
+        const logTitleStr = logTitleBuffer.toString('utf8');
+        logger.info(`[KnowledgeBaseService] 添加业务知识: ${logTitleStr}${embedding ? ' (with embedding)' : ' (without embedding)'}`);
+      } catch (logError) {
+        logger.info(`[KnowledgeBaseService] 添加业务知识: ${logTitle}${embedding ? ' (with embedding)' : ' (without embedding)'}`);
+      }
 
       return knowledgeEntry.toObject();
     } catch (error) {
@@ -1515,7 +1541,19 @@ class KnowledgeBaseService {
         if (this.useVectorDB && children.length > 0) {
           for (const child of children) {
             try {
+              // 删除知识向量
               await this.vectorDBService.deleteKnowledgeVector(child._id.toString(), child.type);
+              
+              // 如果子项关联了文件，同时删除文件向量
+              const childFileId = child.metadata?.file_id;
+              if (childFileId) {
+                try {
+                  await this.vectorDBService.deleteFileVectors(childFileId);
+                  logger.info(`[KnowledgeBaseService] 已删除子项关联的文件向量: fileId=${childFileId}`);
+                } catch (fileVectorError) {
+                  logger.warn(`[KnowledgeBaseService] Failed to delete child file vectors for fileId=${childFileId}:`, fileVectorError.message);
+                }
+              }
             } catch (vectorError) {
               logger.warn(`[KnowledgeBaseService] Failed to delete child vector from VectorDB: ${child._id}`, vectorError.message);
             }
@@ -1540,7 +1578,19 @@ class KnowledgeBaseService {
         // 同时从向量数据库删除（如果启用）
         if (this.useVectorDB) {
           try {
+            // 删除知识向量（business_knowledge 等）
             await this.vectorDBService.deleteKnowledgeVector(entryId.toString(), entry.type);
+            
+            // 如果知识条目关联了文件，同时删除文件向量（file_vectors 表）
+            const fileId = entry.metadata?.file_id;
+            if (fileId) {
+              try {
+                await this.vectorDBService.deleteFileVectors(fileId);
+                logger.info(`[KnowledgeBaseService] 已删除关联的文件向量: fileId=${fileId}`);
+              } catch (fileVectorError) {
+                logger.warn(`[KnowledgeBaseService] Failed to delete file vectors for fileId=${fileId}:`, fileVectorError.message);
+              }
+            }
           } catch (vectorError) {
             logger.warn('[KnowledgeBaseService] Failed to delete vector from VectorDB:', vectorError.message);
           }
@@ -1571,6 +1621,79 @@ class KnowledgeBaseService {
    */
   async getKnowledgeEntries({ userId, type, entityId, includeChildren = false, limit = 100, skip = 0 }) {
     try {
+      // 确保 KnowledgeEntry 模型已初始化
+      if (!KnowledgeEntry) {
+        logger.warn('[KnowledgeBaseService] KnowledgeEntry model is not initialized, attempting to create');
+        // 尝试重新初始化
+        try {
+          const models = require('~/db/models');
+          KnowledgeEntry = models.KnowledgeEntry;
+        } catch (e) {
+          logger.debug('[KnowledgeBaseService] 从 db/models 导入失败');
+        }
+        
+        if (!KnowledgeEntry) {
+          try {
+            const createdModels = createModels(mongoose);
+            KnowledgeEntry = createdModels.KnowledgeEntry;
+          } catch (e) {
+            logger.debug('[KnowledgeBaseService] createModels 未包含 KnowledgeEntry');
+          }
+        }
+        
+        // 如果仍然未定义，直接创建模型
+        if (!KnowledgeEntry && mongoose.connection.readyState === 1) {
+          const KnowledgeEntrySchema = new mongoose.Schema({
+            user: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: 'User',
+              index: true,
+              required: true,
+            },
+            type: {
+              type: String,
+              required: true,
+              index: true,
+            },
+            title: {
+              type: String,
+              required: true,
+            },
+            content: {
+              type: String,
+            },
+            embedding: {
+              type: [Number],
+            },
+            parent_id: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: 'KnowledgeEntry',
+              default: null,
+              index: true,
+            },
+            metadata: {
+              type: mongoose.Schema.Types.Mixed,
+              default: {},
+            },
+          }, {
+            timestamps: true,
+            collection: 'knowledge_entries',
+          });
+
+          if (!mongoose.models.KnowledgeEntry) {
+            KnowledgeEntry = mongoose.model('KnowledgeEntry', KnowledgeEntrySchema);
+            logger.info('[KnowledgeBaseService] KnowledgeEntry 模型已在运行时创建');
+          } else {
+            KnowledgeEntry = mongoose.models.KnowledgeEntry;
+          }
+        }
+        
+        // 如果仍然未定义，抛出错误
+        if (!KnowledgeEntry) {
+          throw new Error('KnowledgeEntry model could not be initialized. MongoDB connection may not be ready.');
+        }
+      }
+
       const query = {};
 
       // userId改为可选，如果提供则过滤，否则查询所有

@@ -5,19 +5,88 @@ const VectorDBService = require('./VectorDBService');
 
 // 确保模型已创建（如果还没有）
 let KnowledgeEntry;
-try {
-  const models = require('~/db/models');
-  KnowledgeEntry = models.KnowledgeEntry;
-  if (!KnowledgeEntry) {
-    // 如果模型未导出，直接创建
+function ensureKnowledgeEntryModel() {
+  if (KnowledgeEntry) {
+    return KnowledgeEntry;
+  }
+  
+  try {
+    const models = require('~/db/models');
+    KnowledgeEntry = models.KnowledgeEntry;
+    if (KnowledgeEntry) {
+      logger.debug('[RetrievalService] KnowledgeEntry model loaded from ~/db/models');
+      return KnowledgeEntry;
+    }
+  } catch (e) {
+    logger.debug('[RetrievalService] Failed to load KnowledgeEntry from ~/db/models:', e.message);
+  }
+  
+  // 如果从 db/models 导入失败，尝试通过 createModels 创建
+  try {
     const createdModels = createModels(mongoose);
     KnowledgeEntry = createdModels.KnowledgeEntry;
+    if (KnowledgeEntry) {
+      logger.debug('[RetrievalService] KnowledgeEntry model created via createModels');
+      return KnowledgeEntry;
+    }
+  } catch (e) {
+    logger.debug('[RetrievalService] Failed to create KnowledgeEntry via createModels:', e.message);
   }
-} catch (e) {
-  // 如果从 db/models 导入失败，直接创建模型
-  const createdModels = createModels(mongoose);
-  KnowledgeEntry = createdModels.KnowledgeEntry;
+  
+  // 如果仍然未定义，且 MongoDB 已连接，直接创建模型 schema
+  if (!KnowledgeEntry && mongoose.connection.readyState === 1) {
+    try {
+      const KnowledgeEntrySchema = new mongoose.Schema({
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          index: true,
+          required: true,
+        },
+        type: {
+          type: String,
+          required: true,
+          index: true,
+        },
+        title: {
+          type: String,
+          required: true,
+        },
+        content: {
+          type: String,
+        },
+        embedding: {
+          type: [Number],
+        },
+        parent_id: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'KnowledgeEntry',
+          default: null,
+        },
+        metadata: {
+          type: mongoose.Schema.Types.Mixed,
+          default: {},
+        },
+      }, {
+        timestamps: true,
+      });
+      
+      KnowledgeEntrySchema.index({ user: 1, type: 1 });
+      KnowledgeEntrySchema.index({ 'metadata.entity_id': 1 });
+      
+      KnowledgeEntry = mongoose.models.KnowledgeEntry || mongoose.model('KnowledgeEntry', KnowledgeEntrySchema);
+      logger.debug('[RetrievalService] KnowledgeEntry model created directly from schema');
+      return KnowledgeEntry;
+    } catch (e) {
+      logger.error('[RetrievalService] Failed to create KnowledgeEntry schema:', e.message);
+    }
+  }
+  
+  return null;
 }
+
+// 初始化模型
+ensureKnowledgeEntryModel();
 // 从编译后的包中导入，或使用本地 JavaScript 文件
 let KnowledgeType;
 try {
@@ -91,6 +160,13 @@ class RetrievalService {
    */
   async retrieveFromKnowledgeBase({ query, userId, types, entityId, topK = 10, minScore = 0.5 }) {
     try {
+      // 确保 KnowledgeEntry 模型已初始化
+      const EntryModel = ensureKnowledgeEntryModel();
+      if (!EntryModel) {
+        logger.error('[RetrievalService] KnowledgeEntry model is not initialized and cannot be created');
+        throw new Error('KnowledgeEntry model is not initialized. Please ensure MongoDB is connected and models are properly loaded.');
+      }
+
       // 1. 将查询文本向量化
       logger.info(`[RetrievalService] 开始向量化查询文本: "${query.substring(0, 50)}${query.length > 50 ? '...' : ''}"`);
       const queryEmbedding = await this.embeddingService.embedText(query, userId);
@@ -118,8 +194,14 @@ class RetrievalService {
 
           // 从 MongoDB 获取完整信息
           if (vectorResults.length > 0) {
+            const KEModel = ensureKnowledgeEntryModel();
+            if (!KEModel) {
+              logger.warn('[RetrievalService] KnowledgeEntry model not available, skipping MongoDB lookup');
+              return [];
+            }
+            
             const knowledgeEntryIds = vectorResults.map(r => r.knowledgeEntryId);
-            const knowledgeEntries = await KnowledgeEntry.find({
+            const knowledgeEntries = await KEModel.find({
               _id: { $in: knowledgeEntryIds },
             })
               .select('type title content embedding metadata user')
@@ -163,6 +245,12 @@ class RetrievalService {
 
       // 3. 回退到 MongoDB 中的向量相似度计算
       logger.info('[RetrievalService] 使用MongoDB进行向量相似度计算（向量数据库不可用或回退）');
+      const KEModel = ensureKnowledgeEntryModel();
+      if (!KEModel) {
+        logger.error('[RetrievalService] KnowledgeEntry model not available for MongoDB fallback');
+        return [];
+      }
+      
       const queryConditions = {};
 
       if (types && types.length > 0) {
@@ -173,7 +261,7 @@ class RetrievalService {
         queryConditions['metadata.entity_id'] = entityId;
       }
 
-      const knowledgeEntries = await KnowledgeEntry.find(queryConditions)
+      const knowledgeEntries = await KEModel.find(queryConditions)
         .select('type title content embedding metadata user')
         .lean();
 
@@ -350,6 +438,13 @@ class RetrievalService {
    */
   async hybridRetrieve({ query, userId, fileIds, types, entityId, topK = 10 }) {
     try {
+      // 确保 KnowledgeEntry 模型已初始化
+      const KEModel = ensureKnowledgeEntryModel();
+      if (!KEModel) {
+        logger.error('[RetrievalService] KnowledgeEntry model not available for hybridRetrieve');
+        throw new Error('KnowledgeEntry model is not initialized. Please ensure MongoDB is connected and models are properly loaded.');
+      }
+
       const promises = [];
 
       // 1. 从知识库检索
@@ -360,6 +455,9 @@ class RetrievalService {
           types,
           entityId,
           topK: Math.ceil(topK * 0.7), // 70% 来自知识库
+        }).catch(error => {
+          logger.error('[RetrievalService] retrieveFromKnowledgeBase failed:', error);
+          return []; // 返回空数组而不是抛出错误
         })
       );
 
@@ -477,20 +575,24 @@ class RetrievalService {
         }
       }
 
-      // 3. 等待知识库检索完成
-      const knowledgeResults = await Promise.all(promises);
-      const allResults = [...knowledgeResults.flat(), ...fileResults];
+      // 3. 等待知识库检索完成（使用 Promise.allSettled 以避免一个失败导致全部失败）
+      const allResults = await Promise.allSettled(promises);
+      const knowledgeResults = allResults[0]?.status === 'fulfilled' ? (allResults[0].value || []) : [];
+      
+      if (allResults[0]?.status === 'rejected') {
+        logger.error('[RetrievalService] retrieveFromKnowledgeBase promise rejected:', allResults[0].reason);
+        logger.error('[RetrievalService] Error stack:', allResults[0].reason?.stack);
+      }
 
-      // 4. 按相似度排序并返回前K个
-      const sortedResults = allResults
-        .sort((a, b) => b.score - a.score)
+      const combinedResults = [...knowledgeResults, ...fileResults]
+        .sort((a, b) => (b.score || b.similarity || 0) - (a.score || a.similarity || 0))
         .slice(0, topK);
 
-      logger.info(`[RetrievalService] 混合检索返回 ${sortedResults.length} 个结果（知识库: ${knowledgeResults.flat().length}，文件: ${fileResults.length}）`);
-
-      return sortedResults;
+      logger.info(`[RetrievalService] 混合检索完成: 知识库 ${knowledgeResults.length} 条，文件 ${fileResults.length} 条，总计 ${combinedResults.length} 条`);
+      return combinedResults;
     } catch (error) {
       logger.error('[RetrievalService] 混合检索失败:', error);
+      logger.error('[RetrievalService] 错误堆栈:', error.stack);
       throw error;
     }
   }
