@@ -39,6 +39,7 @@ const {
   SocialMedia,
   BaziAstrology,
   DatabaseSchema,
+  WritingAssistant,
 } = require('../');
 const { primeFiles: primeCodeFiles } = require('~/server/services/Files/Code/process');
 const { createFileSearchTool, primeFiles: primeSearchFiles } = require('./fileSearch');
@@ -188,6 +189,7 @@ const loadTools = async ({
     database_schema: DatabaseSchema,
     social: SocialMedia,
     bazi_astrology: BaziAstrology,
+    writing: WritingAssistant,
   };
 
   const customConstructors = {
@@ -257,6 +259,9 @@ const loadTools = async ({
       projectRoot: paths.root,
     },
     speckit: {
+      projectRoot: paths.root,
+    },
+    writing: {
       projectRoot: paths.root,
     },
   };
