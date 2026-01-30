@@ -1,0 +1,191 @@
+[
+  {
+    "name": "Traversaal",
+    "pluginKey": "traversaal_search",
+    "description": "Traversaal 是一个为 LLM 智能体量身定制的强大搜索 API。在这里获取你的 API 密钥：<a href=\"https://api.traversaal.ai\" target=\"_blank\">https://api.traversaal.ai</a>",
+    "icon": "https://traversaal.ai/favicon.ico",
+    "authConfig": [
+      {
+        "authField": "TRAVERSAAL_API_KEY",
+        "label": "Traversaal API Key",
+        "description": "获取API密钥：https://api.traversaal.ai"
+      }
+    ]
+  },
+  {
+    "name": "Google",
+    "pluginKey": "google",
+    "description": "使用 Google 搜索获取天气、新闻、体育等更多信息。",
+    "icon": "https://i.imgur.com/SMmVkNB.png",
+    "authConfig": [
+      {
+        "authField": "GOOGLE_CSE_ID",
+        "label": "Google CSE ID",
+        "description": "这是你的 Google Custom Search Engine ID。获取方法请参阅：<a href='https://github.com/constanji/Aipyq/blob/main/docs/features/plugins/google_search.md'>我们的文档</a>。"
+      },
+      {
+        "authField": "GOOGLE_SEARCH_API_KEY",
+        "label": "Google API Key",
+        "description": "这是你的 Google Custom Search API Key。获取方法请参阅：<a href='https://github.com/constanji/Aipyq/blob/main/docs/features/plugins/google_search.md'>我们的文档</a>。"
+      }
+    ]
+  },
+  {
+    "name": "YouTube",
+    "pluginKey": "youtube",
+    "toolkit": true,
+    "description": "获取 YouTube 视频信息、评论、分析转录和搜索视频。",
+    "icon": "https://www.youtube.com/s/desktop/7449ebf7/img/favicon_144x144.png",
+    "authConfig": [
+      {
+        "authField": "YOUTUBE_API_KEY",
+        "label": "YouTube API Key",
+        "description": "你的 YouTube Data API v3 密钥。"
+      }
+    ]
+  },
+  {
+    "name": "OpenAI Image Tools",
+    "pluginKey": "image_gen_oai",
+    "toolkit": true,
+    "description": "使用 OpenAI 的最新最先进的模型生成和编辑图像。",
+    "icon": "assets/image_gen_oai.png",
+    "authConfig": [
+      {
+        "authField": "IMAGE_GEN_OAI_API_KEY",
+        "label": "OpenAI Image Tools API Key",
+        "description": "你的 OpenAI API Key 用于图像生成和编辑。"
+      }
+    ]
+  },
+  {
+    "name": "Wolfram",
+    "pluginKey": "wolfram",
+    "description": "通过 Wolfram|Alpha 和 Wolfram Language 访问计算、数学、精选知识和实时数据。",
+    "icon": "https://www.wolframcdn.com/images/icons/Wolfram.png",
+    "authConfig": [
+      {
+        "authField": "WOLFRAM_APP_ID",
+        "label": "Wolfram App ID",
+        "description": "在所有对 Wolfram|Alpha API 的调用中必须提供一个 AppID。你可以通过在 <a href='http://products.wolframalpha.com/api/'>Wolfram|Alpha</a> 注册并访问 <a href='https://developer.wolframalpha.com/portal/myapps/'>开发者门户</a> 来获取一个。"
+      }
+    ]
+  },
+  {
+    "name": "DALL-E-3",
+    "pluginKey": "dalle",
+    "description": "[DALL-E-3] 从自然语言描述创建真实图像和艺术。",
+    "icon": "https://i.imgur.com/u2TzXzH.png",
+    "authConfig": [
+      {
+        "authField": "DALLE3_API_KEY||DALLE_API_KEY",
+        "label": "OpenAI API Key",
+        "description": "你可以使用 DALL-E 与你的 OpenAI API Key。"
+      }
+    ]
+  },
+  {
+    "name": "Tavily Search",
+    "pluginKey": "tavily_search_results_json",
+    "description": "Tavily Search 是一个为 LLM 智能体量身定制的强大搜索 API。它无缝集成多种数据源，确保提供卓越、相关性强的搜索体验。",
+    "icon": "https://tavily.com/favicon.ico",
+    "authConfig": [
+      {
+        "authField": "TAVILY_API_KEY",
+        "label": "Tavily API Key",
+        "description": "Get your API key here: https://app.tavily.com/"
+      }
+    ]
+  },
+  {
+    "name": "Calculator",
+    "pluginKey": "calculator",
+    "description": "执行简单的和复杂的数学计算。",
+    "icon": "https://i.imgur.com/RHsSG5h.png",
+    "authConfig": []
+  },
+  {
+    "name": "Stable Diffusion",
+    "pluginKey": "stable-diffusion",
+    "description": "根据任何文本输入生成逼真图像。",
+    "icon": "https://i.imgur.com/Yr466dp.png",
+    "authConfig": [
+      {
+        "authField": "SD_WEBUI_URL",
+        "label": "Your Stable Diffusion WebUI API URL",
+        "description": "你需要提供 Stable Diffusion WebUI API 的 URL。获取方法请参阅：<a href='url'>我们的文档</a>。"
+      }
+    ]
+  },
+  {
+    "name": "Azure AI Search",
+    "pluginKey": "azure-ai-search",
+    "description": "使用 Azure AI Search 查找信息",
+    "icon": "https://i.imgur.com/E7crPze.png",
+    "authConfig": [
+      {
+        "authField": "AZURE_AI_SEARCH_SERVICE_ENDPOINT",
+        "label": "Azure AI Search Endpoint",
+        "description": "你需要提供 Azure AI Search 的 Endpoint。"
+      },
+      {
+        "authField": "AZURE_AI_SEARCH_INDEX_NAME",
+        "label": "Azure AI Search Index Name",
+        "description": "你需要提供 Azure AI Search 的 Index Name。"
+      },
+      {
+        "authField": "AZURE_AI_SEARCH_API_KEY",
+        "label": "Azure AI Search API Key",
+        "description": "你需要提供 Azure AI Search 的 API Key。"
+      }
+    ]
+  },
+  {
+    "name": "OpenWeather",
+    "pluginKey": "open_weather",
+    "description": "从 OpenWeather API 获取天气预报和历史数据",
+    "icon": "assets/openweather.png",
+    "authConfig": [
+      {
+        "authField": "OPENWEATHER_API_KEY",
+        "label": "OpenWeather API Key",
+        "description": "Sign up at <a href=\"https://home.openweathermap.org/users/sign_up\" target=\"_blank\">OpenWeather</a>, then get your key at <a href=\"https://home.openweathermap.org/api_keys\" target=\"_blank\">API keys</a>."
+      }
+    ]
+  },
+  {
+    "name": "Flux",
+    "pluginKey": "flux",
+    "description": "使用 Flux API 生成图像。",
+    "icon": "https://blackforestlabs.ai/wp-content/uploads/2024/07/bfl_logo_retraced_blk.png",
+    "isAuthRequired": "true",
+    "authConfig": [
+      {
+        "authField": "FLUX_API_KEY",
+        "label": "Your Flux API Key",
+        "description": "Provide your Flux API key from your user profile."
+      }
+    ]
+  },
+  {
+    "name": "Speckit",
+    "pluginKey": "speckit",
+    "description": "Spec-Driven Development 工具，用于创建规范、计划和任务。指令：specify, plan, tasks, implement, clarify, analyze, checklist, constitution。",
+    "icon": "https://github.com/github/spec-kit/raw/main/media/logo_small.webp",
+    "authConfig": []
+  },
+  {
+    "name": "spec朋友圈生成",
+    "pluginKey": "social",
+    "description": "朋友圈内容生成工具，根据用户输入使用模板系统生成规范的朋友圈内容。Commands: generate (生成朋友圈内容), templates (列出可用模板), format (格式化内容).",
+    "icon": "📱",
+    "authConfig": []
+  },
+  {
+    "name": "生辰八字/星座分析",
+    "pluginKey": "bazi_astrology",
+    "description": "生辰八字/星座分析工具，根据用户输入使用模板系统生成规范的八字命盘、命理分析和星座分析报告。Commands: generate (生成八字命盘或星座分析报告), analyze (进行八字分析或运势预测), templates (列出可用模板).",
+    "icon": "🔮",
+    "authConfig": []
+  }
+]

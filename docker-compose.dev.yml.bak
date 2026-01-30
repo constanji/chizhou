@@ -1,0 +1,154 @@
+# Docker 开发模式配置
+# 支持热重载，修改代码后自动刷新，无需重新构建镜像
+# 使用方法: docker-compose -f docker-compose.dev.yml up
+
+name: aipyq-dev
+
+services:
+  # 后端开发服务
+  backend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: Aipyq-Backend-Dev
+    ports:
+      - "${API_PORT:-3080}:3080"
+    depends_on:
+      - mongodb
+      - meilisearch
+    networks:
+      - aipyq-dev-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3080
+      - NODE_ENV=development
+      - MONGO_URI=mongodb://mongodb:27017/Aipyq
+      - MEILI_HOST=http://meilisearch:7700
+      - AIPYQ_LOG_DIR=/app/api/logs
+      - CONFIG_PATH=/app/Aipyq.yaml
+      - DOMAIN_CLIENT=http://localhost:3090
+      - DOMAIN_SERVER=http://localhost:3080
+    volumes:
+      # 挂载源代码以实现热重载
+      - .:/app:cached
+      # 保护 node_modules，避免本地覆盖容器中的依赖
+      - /app/node_modules
+      - /app/client/node_modules
+      - /app/api/node_modules
+      - /app/packages/data-provider/node_modules
+      - /app/packages/data-schemas/node_modules
+      - /app/packages/api/node_modules
+      - /app/packages/client/node_modules
+      - /app/agents-Aipyq/node_modules
+      # 配置文件和数据
+      - ./Aipyq.yaml:/app/Aipyq.yaml
+      - ./images:/app/client/public/images
+      - ./uploads:/app/uploads
+      - ./logs:/app/api/logs
+    command: npm run backend:dev
+    restart: unless-stopped
+
+  # 前端开发服务 (Vite 开发服务器)
+  frontend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: Aipyq-Frontend-Dev
+    ports:
+      - "3090:3090"
+    depends_on:
+      - backend-dev
+    networks:
+      - aipyq-dev-network
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - HOST=0.0.0.0
+      - PORT=3090
+      - BACKEND_PORT=3080
+      - VITE_API_BASE_URL=http://localhost:3080
+    volumes:
+      # 挂载源代码以实现热重载
+      - .:/app:cached
+      # 保护 node_modules，避免本地覆盖容器中的依赖
+      - /app/node_modules
+      - /app/client/node_modules
+      - /app/api/node_modules
+      - /app/packages/data-provider/node_modules
+      - /app/packages/data-schemas/node_modules
+      - /app/packages/api/node_modules
+      - /app/packages/client/node_modules
+      - /app/agents-Aipyq/node_modules
+    command: npm run frontend:dev
+    restart: unless-stopped
+
+  # MongoDB 数据库（与生产环境共享数据）
+  mongodb:
+    container_name: pyqchat-mongodb-dev
+    image: mongo
+    restart: unless-stopped
+    networks:
+      - aipyq-dev-network
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - ./data-node:/data/db
+    command: mongod --noauth
+
+  # Meilisearch 搜索服务
+  meilisearch:
+    container_name: chat-meilisearch-dev
+    image: getmeili/meilisearch:v1.12.3
+    restart: unless-stopped
+    networks:
+      - aipyq-dev-network
+    ports:
+      - "${MEILI_PORT:-7700}:7700"
+    env_file:
+      - .env
+    environment:
+      - MEILI_HOST=http://meilisearch:7700
+      - MEILI_NO_ANALYTICS=true
+    volumes:
+      - ./meili_data_v1.12:/meili_data
+
+  # 可选的 VectorDB (如果需要 RAG 功能)
+  # vectordb:
+  #   container_name: vectorDB-dev
+  #   image: pgvector/pgvector:0.8.0-pg15-trixie
+  #   environment:
+  #     POSTGRES_DB: mydatabase
+  #     POSTGRES_USER: myuser
+  #     POSTGRES_PASSWORD: mypassword
+  #   restart: unless-stopped
+  #   networks:
+  #     - aipyq-dev-network
+  #   volumes:
+  #     - pgdata2-dev:/var/lib/postgresql/data
+
+  # 可选的 RAG API (如果需要 RAG 功能)
+  # rag_api:
+  #   container_name: Rag_api-dev
+  #   image: ghcr.io/constanji/aipyq-rag-api-dev-lite:latest
+  #   environment:
+  #     - DB_HOST=vectordb
+  #     - RAG_PORT=${RAG_PORT:-8000}
+  #   restart: unless-stopped
+  #   networks:
+  #     - aipyq-dev-network
+  #   depends_on:
+  #     - vectordb
+  #   env_file:
+  #     - .env
+
+networks:
+  aipyq-dev-network:
+    driver: bridge
+
+volumes:
+  pgdata2-dev:

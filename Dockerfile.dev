@@ -1,0 +1,69 @@
+# Docker 开发模式 Dockerfile
+# 用于支持热重载的开发环境
+
+# Base node image
+FROM node:20-alpine AS dev-base
+
+# Install jemalloc
+RUN apk add --no-cache jemalloc
+RUN apk add --no-cache python3 py3-pip uv
+
+# Set environment variable to use jemalloc
+ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2
+
+# Add `uv` for extended MCP support
+COPY --from=ghcr.io/astral-sh/uv:0.6.13 /uv /uvx /bin/
+RUN uv --version
+
+RUN mkdir -p /app && chown node:node /app
+WORKDIR /app
+
+USER node
+
+# Copy package files first for better caching
+COPY --chown=node:node package.json package-lock.json ./
+COPY --chown=node:node api/package.json ./api/package.json
+COPY --chown=node:node client/package.json ./client/package.json
+COPY --chown=node:node packages/data-provider/package.json ./packages/data-provider/package.json
+COPY --chown=node:node packages/data-schemas/package.json ./packages/data-schemas/package.json
+COPY --chown=node:node packages/api/package.json ./packages/api/package.json
+
+# Copy agents-Aipyq package files
+COPY --chown=node:node agents-Aipyq/package.json ./agents-Aipyq/package.json
+COPY --chown=node:node agents-Aipyq/tsconfig*.json ./agents-Aipyq/
+COPY --chown=node:node agents-Aipyq/rollup.config.js ./agents-Aipyq/
+COPY --chown=node:node agents-Aipyq/husky-setup.js ./agents-Aipyq/
+
+ENV HUSKY=0
+
+# Install all dependencies (including dev dependencies for development)
+RUN \
+    npm config set fetch-retry-maxtimeout 600000 ; \
+    npm config set fetch-retries 5 ; \
+    npm config set fetch-retry-mintimeout 15000 ; \
+    cd agents-Aipyq && npm install --no-audit && cd .. ; \
+    npm ci
+
+# Copy agents-Aipyq source files (源代码会通过 volume 挂载，这里只复制必要的配置)
+# 注意：运行时这些文件会被 volume 挂载覆盖
+COPY --chown=node:node agents-Aipyq/src ./agents-Aipyq/src
+RUN mkdir -p ./agents-Aipyq/dist
+
+# 尝试构建 agents-Aipyq
+RUN cd agents-Aipyq && npm run build || echo "Note: agents-Aipyq build optional in dev mode, source will be mounted via volume"
+
+# Copy dist if it exists (will be overridden by volume mount)
+COPY --chown=node:node agents-Aipyq/dist ./agents-Aipyq/dist
+
+# Note: 源代码将通过 volumes 挂载，所以这里只是设置工作目录和安装依赖
+# 在实际运行时，挂载的源代码会覆盖这些文件
+
+# 设置开发环境变量
+ENV NODE_ENV=development
+ENV HOST=0.0.0.0
+
+# 暴露端口
+EXPOSE 3080 3090
+
+# 默认命令（可以在 docker-compose 中覆盖）
+CMD ["npm", "run", "backend:dev"]

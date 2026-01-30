@@ -1,0 +1,48 @@
+import i18n from './i18n';
+import English from './en/translation.json';
+import ChineseSimplified from './zh-Hans/translation.json';
+import ChineseTraditional from './zh-Hant/translation.json';
+import { TranslationKeys } from '~/hooks';
+
+describe('i18next translation tests', () => {
+  // Ensure i18next is initialized before any tests run
+  beforeAll(async () => {
+    if (!i18n.isInitialized) {
+      await i18n.init();
+    }
+  });
+
+  it('should return the correct translation for a valid key in English', () => {
+    i18n.changeLanguage('en');
+    expect(i18n.t('com_ui_examples')).toBe(English.com_ui_examples);
+  });
+
+  it('should return the correct translation for a valid key in Simplified Chinese', () => {
+    i18n.changeLanguage('zh-Hans');
+    expect(i18n.t('com_ui_examples')).toBe(ChineseSimplified.com_ui_examples);
+  });
+
+  it('should return the correct translation for a valid key in Traditional Chinese', () => {
+    i18n.changeLanguage('zh-Hant');
+    expect(i18n.t('com_ui_examples')).toBe(ChineseTraditional.com_ui_examples);
+  });
+
+  it('should fallback to English for an invalid language code', () => {
+    // When an invalid language is provided, i18next should fallback to English
+    i18n.changeLanguage('invalid-code');
+    expect(i18n.t('com_ui_examples')).toBe(English.com_ui_examples);
+  });
+
+  it('should return the key itself for an invalid key', () => {
+    i18n.changeLanguage('en');
+    expect(i18n.t('invalid-key' as TranslationKeys)).toBe('invalid-key'); // Returns the key itself
+  });
+
+  it('should correctly format placeholders in the translation', () => {
+    i18n.changeLanguage('en');
+    expect(i18n.t('com_endpoint_default_with_num', { 0: 'John' })).toBe('default: John');
+
+    i18n.changeLanguage('zh-Hans');
+    expect(i18n.t('com_endpoint_default_with_num', { 0: 'John' })).toBe('默认值：John');
+  });
+});

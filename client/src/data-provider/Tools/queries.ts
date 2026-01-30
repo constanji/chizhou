@@ -1,0 +1,77 @@
+import { useQuery } from '@tanstack/react-query';
+import { Constants, QueryKeys, dataService } from '@aipyq/data-provider';
+import type { QueryObserverResult, UseQueryOptions } from '@tanstack/react-query';
+import type t from '@aipyq/data-provider';
+
+export const useVerifyAgentToolAuth = (
+  params: t.VerifyToolAuthParams,
+  config?: UseQueryOptions<t.VerifyToolAuthResponse>,
+): QueryObserverResult<t.VerifyToolAuthResponse> => {
+  return useQuery<t.VerifyToolAuthResponse>(
+    [QueryKeys.toolAuth, params.toolId],
+    () => dataService.getVerifyAgentToolAuth(params),
+    {
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
+      ...config,
+    },
+  );
+};
+
+export const useGetToolCalls = <TData = t.ToolCallResults>(
+  params: t.GetToolCallParams,
+  config?: UseQueryOptions<t.ToolCallResults, unknown, TData>,
+): QueryObserverResult<TData, unknown> => {
+  const { conversationId = '' } = params;
+  return useQuery<t.ToolCallResults, unknown, TData>(
+    [QueryKeys.toolCalls, conversationId],
+    () => dataService.getToolCalls(params),
+    {
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
+      enabled:
+        conversationId.length > 0 &&
+        conversationId !== Constants.NEW_CONVO &&
+        conversationId !== Constants.PENDING_CONVO &&
+        conversationId !== Constants.SEARCH,
+      ...config,
+    },
+  );
+};
+
+export const useMCPConnectionStatusQuery = (
+  config?: UseQueryOptions<t.MCPConnectionStatusResponse>,
+): QueryObserverResult<t.MCPConnectionStatusResponse> => {
+  return useQuery<t.MCPConnectionStatusResponse>(
+    [QueryKeys.mcpConnectionStatus],
+    () => dataService.getMCPConnectionStatus(),
+    {
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
+      staleTime: 30000, // 30 seconds - 延长 staleTime，减少自动刷新
+      // 使用 keepPreviousData 避免数据更新时重置 UI
+      keepPreviousData: true,
+      ...config,
+    },
+  );
+};
+
+export const useMCPAuthValuesQuery = (
+  serverName: string,
+  config?: UseQueryOptions<t.MCPAuthValuesResponse>,
+): QueryObserverResult<t.MCPAuthValuesResponse> => {
+  return useQuery<t.MCPAuthValuesResponse>(
+    [QueryKeys.mcpAuthValues, serverName],
+    () => dataService.getMCPAuthValues(serverName),
+    {
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
+      enabled: !!serverName,
+      ...config,
+    },
+  );
+};
