@@ -78,9 +78,22 @@ function fixFilenameEncoding(name) {
   }
 
   try {
-    // 尝试将 Latin1 编码的字符串重新解码为 UTF-8
-    // 这是 Node.js multer 的常见问题：UTF-8 文件名被当成 Latin1 读取
-    return Buffer.from(name, 'latin1').toString('utf8');
+    // 检查是否包含乱码字符（Latin1 错误解码的特征）
+    // 如果文件名包含大量非 ASCII 字符且看起来像乱码，尝试修复
+    const hasGarbledChars = /[^\x00-\x7F]/.test(name) && /[à-ÿ]/.test(name);
+    
+    if (hasGarbledChars) {
+      // 尝试将 Latin1 编码的字符串重新解码为 UTF-8
+      // 这是 Node.js multer 的常见问题：UTF-8 文件名被当成 Latin1 读取
+      const fixed = Buffer.from(name, 'latin1').toString('utf8');
+      // 验证修复后的字符串是否包含有效的中文字符
+      if (/[\u4e00-\u9fa5]/.test(fixed)) {
+        return fixed;
+      }
+    }
+    
+    // 如果已经是正确的 UTF-8 或修复失败，返回原始名称
+    return name;
   } catch (error) {
     // 如果转换失败，返回原始名称
     const { logger } = require('@aipyq/data-schemas');

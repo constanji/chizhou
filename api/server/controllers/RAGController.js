@@ -51,9 +51,11 @@ const query = async (req, res) => {
     res.json(result);
   } catch (error) {
     logger.error('[RAGController] 查询失败:', error);
+    logger.error('[RAGController] 错误堆栈:', error.stack);
     res.status(500).json({
       error: 'RAG查询失败',
-      message: error.message,
+      message: error.message || '未知错误',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
 };

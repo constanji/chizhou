@@ -1,4 +1,5 @@
 const fs = require('fs').promises;
+const path = require('path');
 const express = require('express');
 const { EnvVar } = require('@aipyq/agents');
 const { logger } = require('@aipyq/data-schemas');
@@ -333,6 +334,22 @@ router.get('/content/:userId/:file_id', fileAccess, async (req, res) => {
     // 对于本地文件，直接读取
     if (file.source === FileSources.local && file.filepath) {
       try {
+        // 将相对路径转换为绝对路径
+        let absoluteFilePath = file.filepath;
+        if (file.filepath.startsWith('/uploads/')) {
+          const appConfig = req.config;
+          const basePath = file.filepath.split('/uploads/')[1];
+          if (basePath) {
+            absoluteFilePath = path.join(appConfig.paths.uploads, basePath);
+          }
+        } else if (file.filepath.startsWith('/images/')) {
+          const appConfig = req.config;
+          const basePath = file.filepath.split('/images/')[1];
+          if (basePath) {
+            absoluteFilePath = path.join(appConfig.paths.imageOutput, basePath);
+          }
+        }
+        
         let content = '';
         
         // PDF 文件：解析并显示文本内容
@@ -340,7 +357,7 @@ router.get('/content/:userId/:file_id', fileAccess, async (req, res) => {
           const PDFParseService = require('~/server/services/RAG/PDFParseService');
           const pdfParseService = new PDFParseService();
           await pdfParseService.initialize();
-          const chunks = await pdfParseService.parsePDF(file.filepath, {
+          const chunks = await pdfParseService.parsePDF(absoluteFilePath, {
             chunkSize: 10000, // 使用较大的 chunk size 以获取完整内容
             chunkOverlap: 0,
           });
@@ -352,7 +369,7 @@ router.get('/content/:userId/:file_id', fileAccess, async (req, res) => {
           const WordParseService = require('~/server/services/RAG/WordParseService');
           const wordParseService = new WordParseService();
           await wordParseService.initialize();
-          const chunks = await wordParseService.parseWordDocument(file.filepath, {
+          const chunks = await wordParseService.parseWordDocument(absoluteFilePath, {
             chunkSize: 10000, // 使用较大的 chunk size 以获取完整内容
             chunkOverlap: 0,
           });
@@ -362,7 +379,7 @@ router.get('/content/:userId/:file_id', fileAccess, async (req, res) => {
         // 文本文件：直接读取
         else {
           const { readFileAsString } = require('@aipyq/api');
-          const result = await readFileAsString(file.filepath, {
+          const result = await readFileAsString(absoluteFilePath, {
             fileSize: file.bytes,
           });
           content = result.content;

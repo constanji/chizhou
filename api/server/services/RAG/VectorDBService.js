@@ -449,7 +449,13 @@ class VectorDBService {
            embedding = EXCLUDED.embedding::vector,
            metadata = EXCLUDED.metadata::jsonb,
            updated_at = CURRENT_TIMESTAMP`,
-        [knowledgeEntryId, userId, content, embeddingStr, metadata] // 直接传递对象，pg 驱动会自动转换为 JSONB
+        [knowledgeEntryId, userId, content, embeddingStr, JSON.stringify(metadata, (key, value) => {
+          // 移除 null 字符（\u0000），PostgreSQL JSONB 不接受
+          if (typeof value === 'string') {
+            return value.replace(/\u0000/g, '');
+          }
+          return value;
+        })]
       );
 
       logger.debug(`[VectorDBService] Stored vector for ${type} in table ${tableName}: ${knowledgeEntryId}`);
@@ -849,19 +855,28 @@ class VectorDBService {
         }
 
         const embeddingStr = `[${embedding.join(',')}]`;
-        // 修复文件名编码问题
+        // 修复文件名编码问题，并清理 metadata 中的所有字符串字段
         const { fixFilenameEncoding } = require('~/server/utils/files');
-        const filename = fixFilenameEncoding(
-          chunk.metadata?.filename || chunk.metadata?.source?.split('/').pop() || ''
-        );
-        const metadata = {
-          ...chunk.metadata,
-          entity_id: entityId,
-          filename: filename,
-        };
-
-        // 直接传递 JavaScript 对象给 pg 驱动，让它自动处理 JSONB 转换
-        // 这样可以避免 Unicode 转义序列的问题
+        let filename = chunk.metadata?.filename || chunk.metadata?.source?.split('/').pop() || '';
+        filename = fixFilenameEncoding(filename);
+        
+        // 清理 metadata 中的所有字符串值，移除无效字符并修复编码
+        const cleanMetadata = {};
+        for (const [key, value] of Object.entries(chunk.metadata || {})) {
+          if (typeof value === 'string') {
+            // 修复编码并移除 null 字符
+            cleanMetadata[key] = fixFilenameEncoding(value).replace(/\u0000/g, '');
+          } else {
+            cleanMetadata[key] = value;
+          }
+        }
+        cleanMetadata.entity_id = entityId;
+        cleanMetadata.filename = filename;
+        
+        // 将清理后的 metadata 转换为 JSON 字符串
+        // PostgreSQL JSONB 需要有效的 JSON 字符串
+        const metadataJson = JSON.stringify(cleanMetadata);
+        
         await this.pool.query(
           `INSERT INTO file_vectors 
            (file_id, user_id, entity_id, chunk_index, content, embedding, metadata)
@@ -873,7 +888,7 @@ class VectorDBService {
             index,
             chunk.text,
             embeddingStr,
-            metadata, // 直接传递对象，pg 驱动会自动转换为 JSONB
+            metadataJson,
           ]
         );
       });

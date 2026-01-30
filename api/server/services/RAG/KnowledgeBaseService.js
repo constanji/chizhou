@@ -1261,9 +1261,16 @@ class KnowledgeBaseService {
         }
       }
 
-      // 确保日志输出时文件名正确（使用 Buffer 确保 UTF-8 编码）
+      // 确保日志输出时文件名正确
       const logTitle = decodedTitle || decodedFilename || '未知文件';
-      logger.info(`[KnowledgeBaseService] 添加业务知识: ${logTitle}${embedding ? ' (with embedding)' : ' (without embedding)'}`);
+      // 使用 Buffer 确保日志输出时编码正确
+      try {
+        const logTitleBuffer = Buffer.from(logTitle, 'utf8');
+        const logTitleStr = logTitleBuffer.toString('utf8');
+        logger.info(`[KnowledgeBaseService] 添加业务知识: ${logTitleStr}${embedding ? ' (with embedding)' : ' (without embedding)'}`);
+      } catch (logError) {
+        logger.info(`[KnowledgeBaseService] 添加业务知识: ${logTitle}${embedding ? ' (with embedding)' : ' (without embedding)'}`);
+      }
 
       return knowledgeEntry.toObject();
     } catch (error) {
@@ -1534,7 +1541,19 @@ class KnowledgeBaseService {
         if (this.useVectorDB && children.length > 0) {
           for (const child of children) {
             try {
+              // 删除知识向量
               await this.vectorDBService.deleteKnowledgeVector(child._id.toString(), child.type);
+              
+              // 如果子项关联了文件，同时删除文件向量
+              const childFileId = child.metadata?.file_id;
+              if (childFileId) {
+                try {
+                  await this.vectorDBService.deleteFileVectors(childFileId);
+                  logger.info(`[KnowledgeBaseService] 已删除子项关联的文件向量: fileId=${childFileId}`);
+                } catch (fileVectorError) {
+                  logger.warn(`[KnowledgeBaseService] Failed to delete child file vectors for fileId=${childFileId}:`, fileVectorError.message);
+                }
+              }
             } catch (vectorError) {
               logger.warn(`[KnowledgeBaseService] Failed to delete child vector from VectorDB: ${child._id}`, vectorError.message);
             }
@@ -1559,7 +1578,19 @@ class KnowledgeBaseService {
         // 同时从向量数据库删除（如果启用）
         if (this.useVectorDB) {
           try {
+            // 删除知识向量（business_knowledge 等）
             await this.vectorDBService.deleteKnowledgeVector(entryId.toString(), entry.type);
+            
+            // 如果知识条目关联了文件，同时删除文件向量（file_vectors 表）
+            const fileId = entry.metadata?.file_id;
+            if (fileId) {
+              try {
+                await this.vectorDBService.deleteFileVectors(fileId);
+                logger.info(`[KnowledgeBaseService] 已删除关联的文件向量: fileId=${fileId}`);
+              } catch (fileVectorError) {
+                logger.warn(`[KnowledgeBaseService] Failed to delete file vectors for fileId=${fileId}:`, fileVectorError.message);
+              }
+            }
           } catch (vectorError) {
             logger.warn('[KnowledgeBaseService] Failed to delete vector from VectorDB:', vectorError.message);
           }

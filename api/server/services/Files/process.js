@@ -740,10 +740,11 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
     temp_file_id,
     bytes,
     filepath,
-    // 对于知识库文件，使用原始文件名（保留中文字符）；其他文件使用 sanitized 文件名
+    // 对于知识库文件，使用修复后的原始文件名（保留中文字符）；其他文件使用 sanitized 文件名
+    // 确保文件名在所有情况下都经过编码修复
     filename: tool_resource === EToolResources.file_search 
-      ? (filename || originalFilename)
-      : (filename ?? sanitizeFilename(file.originalname)),
+      ? (filename || originalFilename)  // originalFilename 已经在上面通过 fixFilenameEncoding 修复
+      : (filename ?? sanitizeFilename(originalFilename)),  // 也使用修复后的文件名进行 sanitize
     context: messageAttachment ? FileContext.message_attachment : FileContext.agents,
     model: messageAttachment ? undefined : req.body.model,
     metadata: fileInfoMetadata,

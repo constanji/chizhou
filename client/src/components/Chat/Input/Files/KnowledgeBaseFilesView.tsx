@@ -4,11 +4,11 @@ import type { TFile } from '@aipyq/data-provider';
 import { OGDialog, OGDialogContent, OGDialogHeader, OGDialogTitle, Button, Input, Spinner, useToastContext } from '@aipyq/client';
 import { useGetKnowledgeListQuery, useAddKnowledgeMutation, useDeleteKnowledgeMutation, useRAGQuery, type KnowledgeEntry } from '~/data-provider/KnowledgeBase';
 import { useUploadFileMutation, useFileContent } from '~/data-provider/Files';
-import { useLocalize } from '~/hooks';
+import { useLocalize, useAuthContext } from '~/hooks';
 import { useRecoilValue } from 'recoil';
 import store from '~/store';
 import { cn } from '~/utils';
-import { Upload, Trash2, Search, FileText, X, Eye, XCircle } from 'lucide-react';
+import { Upload, Trash2, Search, FileText, X, Eye, XCircle, TestTube } from 'lucide-react';
 
 const KnowledgeType = {
   FILE: 'file',
@@ -20,7 +20,7 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
   const { showToast } = useToastContext();
   const user = useRecoilValue(store.user);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [ragTestQuery, setRagTestQuery] = useState('');
+  const [showRAGTestModal, setShowRAGTestModal] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
 
@@ -67,33 +67,11 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
   });
 
   // 删除知识条目 mutation
-  const deleteKnowledgeMutation = useDeleteKnowledgeMutation({
-    onSuccess: () => {
-      showToast({
-        message: '删除成功',
-        status: 'success',
-      });
-      refetch();
-    },
-    onError: (error: any) => {
-      showToast({
-        message: `删除失败: ${error.message || '未知错误'}`,
-        status: 'error',
-      });
-    },
-  });
+  const deleteKnowledgeMutation = useDeleteKnowledgeMutation();
 
-  // RAG 测试查询
-  const { data: ragResults, isLoading: isRagLoading, refetch: refetchRAG } = useRAGQuery(
-    ragTestQuery,
-    selectedFileId ? { fileIds: [selectedFileId] } : undefined,
-    {
-      enabled: false, // 手动触发
-    },
-  );
 
   // 文件内容查询
-  const { data: fileContent, isLoading: isContentLoading, refetch: refetchContent } = useFileContent(
+  const { data: fileContent, isLoading: isContentLoading, error: contentError } = useFileContent(
     user?.id,
     viewingFileId || undefined,
   );
@@ -116,24 +94,28 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
 
   const handleDelete = (entry: KnowledgeEntry) => {
     if (confirm(`确定要删除文件 "${entry.title}" 吗？`)) {
-      deleteKnowledgeMutation.mutate(entry._id);
+      deleteKnowledgeMutation.mutate(entry._id, {
+        onSuccess: () => {
+          showToast({
+            message: '删除成功',
+            status: 'success',
+          });
+          refetch();
+        },
+        onError: (error: any) => {
+          showToast({
+            message: `删除失败: ${error.message || '未知错误'}`,
+            status: 'error',
+          });
+        },
+      });
     }
   };
 
-  const handleRAGTest = () => {
-    if (!ragTestQuery.trim()) {
-      showToast({
-        message: '请输入测试查询',
-        status: 'warning',
-      });
-      return;
-    }
-    refetchRAG();
-  };
 
   const handleViewFile = (fileId: string) => {
     setViewingFileId(fileId);
-    refetchContent();
+    // 不需要手动调用 refetchContent，因为 enabled 条件会自动触发查询
   };
 
   const handleCloseView = () => {
@@ -154,87 +136,49 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
 
         <div className="flex flex-col gap-4">
           {/* 上传区域 */}
-          <div className="flex items-center gap-2 border-b border-border-light pb-4">
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              onChange={handleFileSelect}
-              accept=".pdf,.doc,.docx,.txt,.md"
-              aria-label="上传文件"
-            />
-            <Button
-              onClick={handleUploadClick}
-              disabled={uploadFileMutation.isLoading}
-              className="flex items-center gap-2"
-            >
-              <Upload className="h-4 w-4" />
-              {uploadFileMutation.isLoading ? '上传中...' : '上传文件'}
-            </Button>
-            {uploadFileMutation.isLoading && (
-              <Spinner className="h-4 w-4" />
-            )}
-          </div>
-
-          {/* RAG 测试区域 */}
-          <div className="rounded-lg border border-border-light bg-surface-secondary p-4">
-            <h3 className="mb-2 text-sm font-medium">RAG 测试</h3>
-            <div className="flex gap-2">
-              <Input
-                value={ragTestQuery}
-                onChange={(e) => setRagTestQuery(e.target.value)}
-                placeholder="输入测试查询..."
-                className="flex-1"
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleRAGTest();
-                  }
-                }}
+          <div className="flex items-center justify-between border-b border-border-light pb-4">
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleFileSelect}
+                accept=".pdf,.doc,.docx,.txt,.md"
+                aria-label="上传文件"
               />
               <Button
-                onClick={handleRAGTest}
-                disabled={isRagLoading || !ragTestQuery.trim()}
-                variant="outline"
+                onClick={handleUploadClick}
+                disabled={uploadFileMutation.isLoading}
                 className="flex items-center gap-2"
               >
-                <Search className="h-4 w-4" />
-                测试
+                <Upload className="h-4 w-4" />
+                {uploadFileMutation.isLoading ? '上传中...' : '上传文件'}
               </Button>
+              {uploadFileMutation.isLoading && (
+                <Spinner className="h-4 w-4" />
+              )}
             </div>
-            {selectedFileId && (
-              <div className="mt-2 flex items-center gap-2 text-xs text-text-secondary">
-                <span>仅测试文件:</span>
-                <span className="font-medium">{files.find((f) => f.metadata?.file_id === selectedFileId)?.title}</span>
-                <button
-                  onClick={() => setSelectedFileId(null)}
-                  className="text-red-500 hover:text-red-700"
-                  aria-label="清除文件选择"
-                  title="清除文件选择"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )}
-            {ragResults && (
-              <div className="mt-4 rounded border border-border-light bg-surface-primary p-3">
-                <div className="mb-2 text-sm font-medium">查询结果 ({ragResults.total} 条):</div>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {ragResults.results.map((result, index) => (
-                    <div
-                      key={index}
-                      className="rounded border border-border-light bg-background p-2 text-xs"
-                    >
-                      <div className="mb-1 flex items-center justify-between">
-                        <span className="font-medium">结果 {index + 1}</span>
-                        <span className="text-text-secondary">相似度: {(result.score * 100).toFixed(1)}%</span>
-                      </div>
-                      <div className="text-text-secondary line-clamp-3">{result.content}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <Button
+              onClick={() => setShowRAGTestModal(true)}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <TestTube className="h-4 w-4" />
+              RAG测试
+            </Button>
           </div>
+
+          {/* RAG 测试模态框 */}
+          {showRAGTestModal && (
+            <RAGTestModal
+              selectedFileId={selectedFileId}
+              files={files}
+              onClose={() => {
+                setShowRAGTestModal(false);
+                setSelectedFileId(null);
+              }}
+            />
+          )}
 
           {/* 文件内容查看对话框 */}
           {viewingFileId && (
@@ -262,11 +206,24 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                   {isContentLoading ? (
                     <div className="flex items-center justify-center py-8">
                       <Spinner className="h-6 w-6" />
+                      <span className="ml-2 text-sm text-text-secondary">加载中...</span>
+                    </div>
+                  ) : contentError ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-text-secondary">
+                      <p className="text-sm font-medium text-red-500">加载失败</p>
+                      <p className="mt-2 text-xs">
+                        {contentError instanceof Error ? contentError.message : '无法加载文件内容'}
+                      </p>
                     </div>
                   ) : fileContent ? (
-                    <pre className="whitespace-pre-wrap break-words rounded border border-border-light bg-surface-secondary p-4 text-sm">
-                      {fileContent.content}
-                    </pre>
+                    <div className="space-y-2">
+                      <div className="text-xs text-text-secondary">
+                        文件名: {fileContent.filename} | 类型: {fileContent.type} | 大小: {(fileContent.size / 1024).toFixed(2)} KB
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words rounded border border-border-light bg-surface-secondary p-4 text-sm">
+                        {fileContent.content}
+                      </pre>
+                    </div>
                   ) : (
                     <div className="flex items-center justify-center py-8 text-text-secondary">
                       <p>无法加载文件内容</p>
@@ -319,9 +276,14 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleViewFile(entry.metadata.file_id)}
+                            onClick={() => {
+                              if (entry.metadata?.file_id) {
+                                handleViewFile(entry.metadata.file_id);
+                              }
+                            }}
                             className="text-xs"
                             title="查看文件内容"
+                            disabled={!entry.metadata?.file_id}
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
@@ -330,7 +292,7 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                             size="sm"
                             onClick={() => {
                               setSelectedFileId(entry.metadata?.file_id || null);
-                              setRagTestQuery('');
+                              setShowRAGTestModal(true);
                             }}
                             className="text-xs"
                           >
@@ -356,5 +318,290 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
         </div>
       </OGDialogContent>
     </OGDialog>
+  );
+}
+
+interface RAGTestModalProps {
+  selectedFileId: string | null;
+  files: KnowledgeEntry[];
+  onClose: () => void;
+}
+
+function RAGTestModal({ selectedFileId, files, onClose }: RAGTestModalProps) {
+  const { showToast } = useToastContext();
+  const { token } = useAuthContext();
+  const [query, setQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
+  const [metadata, setMetadata] = useState<any>(null);
+
+  const handleTest = async () => {
+    if (!query.trim()) {
+      showToast({
+        message: '请输入查询内容',
+        status: 'error',
+      });
+      return;
+    }
+
+    if (!token) {
+      showToast({
+        message: '未登录，请先登录',
+        status: 'error',
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    setResults([]);
+    setMetadata(null);
+
+    try {
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      };
+
+      const response = await fetch('/api/rag/query', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          query: query.trim(),
+          options: {
+            fileIds: selectedFileId ? [selectedFileId] : undefined,
+            topK: 10,
+            useReranking: true,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        const isJson = contentType && contentType.includes('application/json');
+        
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        
+        if (isJson) {
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+          } catch (e) {
+            // JSON 解析失败
+          }
+        } else {
+          const text = await response.text().catch(() => '');
+          errorMessage = text || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(`服务器返回了非 JSON 响应: ${text.substring(0, 100)}`);
+      }
+
+      const data = await response.json();
+      const allResults = data.results || [];
+      
+      setResults(allResults);
+      setMetadata(data.metadata || null);
+
+      if (allResults.length > 0) {
+        const scoreRange = allResults.length > 1 
+          ? `相似度范围: ${(Math.min(...allResults.map(r => r.score || r.similarity || 0)) * 100).toFixed(1)}% - ${(Math.max(...allResults.map(r => r.score || r.similarity || 0)) * 100).toFixed(1)}%`
+          : '';
+        showToast({
+          message: `成功检索到 ${allResults.length} 条结果${scoreRange ? `，${scoreRange}` : ''}`,
+          status: 'success',
+        });
+      } else {
+        showToast({
+          message: '未检索到相关结果',
+          status: 'info',
+        });
+      }
+    } catch (error: any) {
+      console.error('RAG查询失败:', error);
+      showToast({
+        message: `RAG查询失败: ${error.message || '未知错误'}`,
+        status: 'error',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getTypeLabel = (type: string) => {
+    const typeMap: Record<string, string> = {
+      semantic_model: '语义模型',
+      qa_pair: 'QA对',
+      synonym: '同义词',
+      business_knowledge: '业务知识',
+      file: '文件',
+    };
+    return typeMap[type] || type;
+  };
+
+  const selectedFile = selectedFileId ? files.find((f) => f.metadata?.file_id === selectedFileId) : null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="w-full max-w-4xl max-h-[90vh] rounded-lg bg-surface-primary p-6 shadow-lg overflow-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-text-primary">RAG测试</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+            aria-label="关闭"
+            title="关闭"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {selectedFile && (
+            <div className="rounded-lg border border-border-light bg-surface-secondary p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-text-secondary">仅测试文件:</span>
+                  <span className="text-sm font-medium text-text-primary">{selectedFile.title}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    // 清除文件选择，但保持模态框打开
+                    // 这里需要通过父组件处理，所以暂时不处理
+                  }}
+                  className="text-red-500 hover:text-red-700"
+                  aria-label="清除文件选择"
+                  title="清除文件选择"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-text-primary mb-2">
+              查询内容
+            </label>
+            <textarea
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              rows={3}
+              className="w-full rounded border border-border-light bg-surface-secondary px-3 py-2 text-sm text-text-primary"
+              placeholder="输入要查询的问题或关键词..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  handleTest();
+                }
+              }}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              onClick={onClose}
+              variant="outline"
+              className="rounded-lg px-4 py-2"
+            >
+              关闭
+            </Button>
+            <Button
+              type="button"
+              onClick={handleTest}
+              disabled={isLoading || !query.trim()}
+              className="rounded-lg px-4 py-2"
+            >
+              {isLoading ? (
+                <>
+                  <Spinner className="h-4 w-4 mr-2" />
+                  查询中...
+                </>
+              ) : (
+                '测试查询'
+              )}
+            </Button>
+          </div>
+
+          {metadata && (
+            <div className="rounded-lg border border-border-light bg-surface-secondary p-3">
+              <p className="text-xs text-text-secondary">
+                检索数量: {metadata.retrievalCount || 0} | 
+                重排: {metadata.reranked ? '是' : '否'} | 
+                增强重排: {metadata.enhancedReranking ? '是' : '否'}
+              </p>
+            </div>
+          )}
+
+          {results.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-text-primary">
+                检索结果 ({results.length} 条)
+              </h4>
+              <div className="space-y-2 max-h-96 overflow-auto">
+                {results.map((result, index) => (
+                  <div
+                    key={index}
+                    className="rounded-lg border border-border-light bg-surface-secondary p-4"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium px-2 py-1 rounded bg-primary/20 text-primary">
+                          {getTypeLabel(result.type)}
+                        </span>
+                        {(result.score !== undefined || result.similarity !== undefined) && (
+                          <span className="text-xs text-text-tertiary">
+                            相似度: {((result.score || result.similarity || 0) * 100).toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {result.title && (
+                      <h5 className="text-sm font-medium text-text-primary mb-1">
+                        {result.title}
+                      </h5>
+                    )}
+                    <p className="text-sm text-text-secondary whitespace-pre-wrap">
+                      {result.content}
+                    </p>
+                    {result.metadata && Object.keys(result.metadata).length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {Object.entries(result.metadata)
+                          .filter(([key]) => key !== 'file_id' && key !== 'filename')
+                          .slice(0, 3)
+                          .map(([key, value]) => (
+                            <span
+                              key={key}
+                              className="rounded bg-surface-primary px-2 py-1 text-xs text-text-secondary"
+                            >
+                              {key}: {String(value)}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!isLoading && results.length === 0 && query && (
+            <div className="text-center py-8 text-text-secondary">
+              <p className="text-sm">暂无检索结果</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
