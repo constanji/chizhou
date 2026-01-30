@@ -1,14 +1,14 @@
-import { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { FileSources, FileContext } from '@aipyq/data-provider';
 import type { TFile } from '@aipyq/data-provider';
 import { OGDialog, OGDialogContent, OGDialogHeader, OGDialogTitle, Button, Input, Spinner, useToastContext } from '@aipyq/client';
-import { useGetKnowledgeListQuery, useAddKnowledgeMutation, useDeleteKnowledgeMutation, useRAGQuery, type KnowledgeEntry } from '~/data-provider/KnowledgeBase';
+import { useGetKnowledgeListQuery, useAddKnowledgeMutation, useDeleteKnowledgeMutation, useUpdateKnowledgeMutation, useRAGQuery, type KnowledgeEntry } from '~/data-provider/KnowledgeBase';
 import { useUploadFileMutation, useFileContent } from '~/data-provider/Files';
 import { useLocalize, useAuthContext } from '~/hooks';
 import { useRecoilValue } from 'recoil';
 import store from '~/store';
 import { cn } from '~/utils';
-import { Upload, Trash2, Search, FileText, X, Eye, XCircle, TestTube } from 'lucide-react';
+import { Upload, Trash2, FileText, X, Eye, XCircle, TestTube, Folder, FolderOpen, ChevronRight, ChevronDown, Plus, Pencil, Check } from 'lucide-react';
 
 const KnowledgeType = {
   FILE: 'file',
@@ -23,6 +23,11 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
   const [showRAGTestModal, setShowRAGTestModal] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
 
   // 查询知识库文件列表（只查询文件类型）
   const { data: knowledgeList, isLoading, refetch } = useGetKnowledgeListQuery({
@@ -32,6 +37,9 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
 
   // 添加知识条目 mutation
   const addKnowledgeMutation = useAddKnowledgeMutation();
+  
+  // 更新知识条目 mutation
+  const updateKnowledgeMutation = useUpdateKnowledgeMutation();
 
   // 文件上传 mutation
   const uploadFileMutation = useUploadFileMutation({
@@ -44,12 +52,14 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
             fileId: fileData.file_id,
             filename: fileData.filename,
             title: fileData.filename,
+            category: selectedCategory || undefined,
           },
         });
         showToast({
           message: '文件上传并向量化成功',
           status: 'success',
         });
+        setSelectedCategory(''); // 重置选择的分类
         refetch();
       } catch (error: any) {
         showToast({
@@ -122,7 +132,135 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
     setViewingFileId(null);
   };
 
+  const handleCreateFolder = () => {
+    setShowCreateFolderModal(true);
+    setNewCategoryName('');
+  };
+
+  const handleSaveFolder = () => {
+    if (!newCategoryName.trim()) {
+      showToast({
+        message: '文件夹名称不能为空',
+        status: 'error',
+      });
+      return;
+    }
+    setShowCreateFolderModal(false);
+    setNewCategoryName('');
+    // 展开新创建的文件夹
+    setExpandedCategories(prev => new Set(prev).add(newCategoryName.trim()));
+    showToast({
+      message: `文件夹 "${newCategoryName.trim()}" 已创建`,
+      status: 'success',
+    });
+  };
+
+  const handleStartEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setNewCategoryName(category);
+  };
+
+  const handleSaveCategoryRename = async () => {
+    if (!editingCategory || !newCategoryName.trim()) {
+      setEditingCategory(null);
+      setNewCategoryName('');
+      return;
+    }
+
+    if (editingCategory === newCategoryName.trim()) {
+      setEditingCategory(null);
+      setNewCategoryName('');
+      return;
+    }
+
+    try {
+      // 更新该分类下所有文件的 category
+      const categoryFiles = groupedFiles[editingCategory] || [];
+      const updatePromises = categoryFiles.map(entry =>
+        updateKnowledgeMutation.mutateAsync({
+          id: entry._id,
+          type: KnowledgeType.BUSINESS_KNOWLEDGE,
+          data: {
+            category: newCategoryName.trim(),
+          },
+        })
+      );
+
+      await Promise.all(updatePromises);
+      
+      showToast({
+        message: `文件夹已重命名为 "${newCategoryName.trim()}"`,
+        status: 'success',
+      });
+      
+      // 更新展开状态
+      setExpandedCategories(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(editingCategory);
+        newSet.add(newCategoryName.trim());
+        return newSet;
+      });
+      
+      setEditingCategory(null);
+      setNewCategoryName('');
+      refetch();
+    } catch (error: any) {
+      showToast({
+        message: `重命名失败: ${error.message || '未知错误'}`,
+        status: 'error',
+      });
+    }
+  };
+
+  const handleCancelEditCategory = () => {
+    setEditingCategory(null);
+    setNewCategoryName('');
+  };
+
+  const toggleCategory = (category: string) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(category)) {
+        newSet.delete(category);
+      } else {
+        newSet.add(category);
+      }
+      return newSet;
+    });
+  };
+
   const files = knowledgeList?.data || [];
+  
+  // 按分类分组文件
+  const groupedFiles = files.reduce((acc, entry) => {
+    const category = entry.metadata?.category || '未分类';
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push(entry);
+    return acc;
+  }, {} as Record<string, KnowledgeEntry[]>);
+
+  // 按分类名称排序
+  const sortedCategories = Object.keys(groupedFiles).sort((a, b) => {
+    if (a === '未分类') return 1;
+    if (b === '未分类') return -1;
+    return a.localeCompare(b, 'zh-CN');
+  });
+
+  // 当文件列表更新时，自动展开新分类
+  useEffect(() => {
+    if (files.length > 0) {
+      setExpandedCategories(prev => {
+        const newSet = new Set(prev);
+        files.forEach(entry => {
+          const category = entry.metadata?.category || '未分类';
+          newSet.add(category);
+        });
+        return newSet;
+      });
+    }
+  }, [files.length]);
 
   return (
     <OGDialog open={open} onOpenChange={onOpenChange}>
@@ -157,6 +295,27 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
               {uploadFileMutation.isLoading && (
                 <Spinner className="h-4 w-4" />
               )}
+              <Button
+                onClick={handleCreateFolder}
+                variant="outline"
+                className="flex items-center gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                新建文件夹
+              </Button>
+              {selectedCategory && (
+                <div className="flex items-center gap-2 text-sm text-text-secondary">
+                  <span>上传到:</span>
+                  <span className="font-medium text-text-primary">{selectedCategory}</span>
+                  <button
+                    onClick={() => setSelectedCategory('')}
+                    className="text-red-500 hover:text-red-700"
+                    aria-label="清除选择"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
             </div>
             <Button
               onClick={() => setShowRAGTestModal(true)}
@@ -167,6 +326,62 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
               RAG测试
             </Button>
           </div>
+
+          {/* 创建文件夹模态框 */}
+          {showCreateFolderModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50" onClick={() => setShowCreateFolderModal(false)}>
+              <div
+                className="w-full max-w-md rounded-lg bg-surface-primary p-6 shadow-lg"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-text-primary">新建文件夹</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateFolderModal(false)}
+                    className="rounded p-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                    aria-label="关闭"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-text-primary mb-2">
+                      文件夹名称
+                    </label>
+                    <Input
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="输入文件夹名称..."
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSaveFolder();
+                        }
+                      }}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => setShowCreateFolderModal(false)}
+                      variant="outline"
+                    >
+                      取消
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleSaveFolder}
+                      disabled={!newCategoryName.trim()}
+                    >
+                      创建
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* RAG 测试模态框 */}
           {showRAGTestModal && (
@@ -248,70 +463,163 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
               </div>
             ) : (
               <div className="space-y-2">
-                {files.map((entry) => (
-                  <div
-                    key={entry._id}
-                    className="flex items-center justify-between rounded-lg border border-border-light bg-surface-secondary p-3 hover:bg-surface-hover"
-                  >
-                    <div className="flex flex-1 items-center gap-3">
-                      <FileText className="h-5 w-5 text-text-secondary" />
-                      <div className="flex-1">
-                        <div className="font-medium">{entry.title}</div>
-                        <div className="text-xs text-text-secondary">
-                          {entry.metadata?.filename && (
-                            <span>文件: {entry.metadata.filename}</span>
+                {sortedCategories.map((category) => {
+                  const categoryFiles = groupedFiles[category];
+                  const isExpanded = expandedCategories.has(category);
+                  
+                  return (
+                    <div key={category} className="space-y-1">
+                      {/* 分类文件夹头部 */}
+                      <div className="flex w-full items-center justify-between rounded-lg border border-border-light bg-surface-secondary p-3 hover:bg-surface-hover transition-colors">
+                        <button
+                          onClick={() => toggleCategory(category)}
+                          className="flex flex-1 items-center gap-2"
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="h-4 w-4 text-text-secondary" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-text-secondary" />
                           )}
-                          {entry.metadata?.category && (
-                            <span className="ml-2">分类: {entry.metadata.category}</span>
+                          {isExpanded ? (
+                            <FolderOpen className="h-5 w-5 text-primary" />
+                          ) : (
+                            <Folder className="h-5 w-5 text-primary" />
                           )}
-                          <span className="ml-2">
-                            创建时间: {new Date(entry.createdAt).toLocaleString('zh-CN')}
-                          </span>
-                        </div>
+                          {editingCategory === category ? (
+                            <Input
+                              value={newCategoryName}
+                              onChange={(e) => setNewCategoryName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleSaveCategoryRename();
+                                } else if (e.key === 'Escape') {
+                                  handleCancelEditCategory();
+                                }
+                              }}
+                              className="h-7 w-48 text-sm"
+                              autoFocus
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <>
+                              <span className="font-medium text-text-primary">{category}</span>
+                              <span className="text-xs text-text-secondary">({categoryFiles.length})</span>
+                            </>
+                          )}
+                        </button>
+                        {editingCategory === category ? (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSaveCategoryRename();
+                              }}
+                              className="h-6 w-6 p-0"
+                              title="保存"
+                            >
+                              <Check className="h-3 w-3 text-green-500" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCancelEditCategory();
+                              }}
+                              className="h-6 w-6 p-0"
+                              title="取消"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStartEditCategory(category);
+                              }}
+                              className="h-6 w-6 p-0"
+                              title="重命名文件夹"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedCategory(category);
+                              }}
+                              className="h-6 w-6 p-0 text-primary"
+                              title="在此文件夹上传文件"
+                            >
+                              <Upload className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {entry.metadata?.file_id && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              if (entry.metadata?.file_id) {
-                                handleViewFile(entry.metadata.file_id);
-                              }
-                            }}
-                            className="text-xs"
-                            title="查看文件内容"
-                            disabled={!entry.metadata?.file_id}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedFileId(entry.metadata?.file_id || null);
-                              setShowRAGTestModal(true);
-                            }}
-                            className="text-xs"
-                          >
-                            测试此文件
-                          </Button>
-                        </>
+                      
+                      {/* 分类下的文件列表 */}
+                      {isExpanded && (
+                        <div className="ml-6 space-y-1 border-l-2 border-border-light pl-2">
+                          {categoryFiles.map((entry) => (
+                            <div
+                              key={entry._id}
+                              className="flex items-center justify-between rounded-lg border border-border-light bg-surface-secondary p-3 hover:bg-surface-hover"
+                            >
+                              <div className="flex flex-1 items-center gap-3">
+                                <FileText className="h-5 w-5 text-text-secondary" />
+                                <div className="flex-1">
+                                  <div className="font-medium">{entry.title}</div>
+                                  <div className="text-xs text-text-secondary">
+                                    {entry.metadata?.filename && (
+                                      <span>文件: {entry.metadata.filename}</span>
+                                    )}
+                                    <span className="ml-2">
+                                      创建时间: {new Date(entry.createdAt).toLocaleString('zh-CN')}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {entry.metadata?.file_id && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      if (entry.metadata?.file_id) {
+                                        handleViewFile(entry.metadata.file_id);
+                                      }
+                                    }}
+                                    className="text-xs"
+                                    title="查看文件内容"
+                                    disabled={!entry.metadata?.file_id}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDelete(entry)}
+                                  disabled={deleteKnowledgeMutation.isLoading}
+                                  className="text-red-500 hover:text-red-700"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(entry)}
-                        disabled={deleteKnowledgeMutation.isLoading}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
