@@ -98,7 +98,7 @@
   "overrides": {
     "@langchain/openai": "0.5.18",
     "@browserbasehq/stagehand": {
-      "openai": "$openai"
+      "openai": "5.8.2"
     }
   },
   "dependencies": {

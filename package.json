@@ -131,6 +131,9 @@
       "micromark-extension-math": {
         "katex": "^0.16.21"
       }
+    },
+    "@browserbasehq/stagehand": {
+      "openai": "5.8.2"
     }
   },
   "nodemonConfig": {

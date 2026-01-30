@@ -23,6 +23,8 @@ const plugins = [
     extensions: ['.js', '.jsx', '.ts', '.tsx'],
     browser: true,
     preferBuiltins: false,
+    // 在 workspace 环境中，允许解析到根目录的 node_modules
+    // 这对于 peerDependencies 的类型检查和路径解析很重要
   }),
   replace({
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),

@@ -125,23 +125,56 @@
 5. **配置环境变量**
    ```bash
    cp .env.example .env
-   cp Aipyq.yaml.example Aipyq.yaml
+   cp Chizhou.yaml.example Chizhou.yaml
    # 按需编辑 .env，配置数据库、密钥等
+   # 确保 .env 中包含以下配置（用于本地开发）：
+   # MONGO_URI=mongodb://localhost:27017/Chizhou
+   # MEILI_HOST=http://localhost:7700
    ```
 
-6. **启动后端（终端 1）**
+6. **启动数据库服务（必须）**
    ```bash
+   # 注意：本地跑后端时请用 docker-compose.local-dev.yml，不要用 deploy-compose.yml
+   # （deploy-compose 不把 MongoDB 映射到本机，本地进程连不上）
+   
+   # 启动所有服务（包括 Meilisearch）
+   docker compose -f docker-compose.local-dev.yml up -d
+   
+   # 如果禁用了搜索（SEARCH=false），可以只启动 MongoDB 和 PostgreSQL：
+   # docker compose -f docker-compose.local-dev.yml up -d mongodb vectordb
+   
+   # 查看服务状态（确认 mongodb 在 27027、meilisearch 在 7700）
+   docker compose -f docker-compose.local-dev.yml ps
+   
+   # 查看日志（如果需要）
+   docker compose -f docker-compose.local-dev.yml logs -f
+   
+   # 停止服务（开发完成后）
+   # docker compose -f docker-compose.local-dev.yml down
+   ```
+   
+   **若后端报 `ECONNREFUSED 127.0.0.1:27017`：**
+   - 确认用的是 `docker-compose.local-dev.yml` 且已 `up -d`
+   - 确认 `.env` 中 `MONGO_URI=mongodb://localhost:27027/Chizhou`（端口与 compose 中映射一致）
+   - 在**项目根目录**执行 `npm run backend:dev`（不要进 api/ 再跑）
+
+7. **启动后端（终端 1）**
+   ```bash
+   # 必须在项目根目录执行
    npm run backend:dev
    ```
 
-7. **启动前端（终端 2）**
+8. **启动前端（终端 2）**
    ```bash
    npm run frontend:dev
    ```
 
-8. **默认访问地址**
+9. **默认访问地址**
    - 开发前端：`http://localhost:3090`
    - 后端 API：`http://localhost:3080`
+   - MongoDB：`localhost:27027`（根据 .env 中的 MONGO_URI 配置）
+   - Meilisearch：`http://localhost:7700`（如果 SEARCH=true）
+   - PostgreSQL 向量数据库：`localhost:5234`（如果使用 RAG 功能）
 
 
 

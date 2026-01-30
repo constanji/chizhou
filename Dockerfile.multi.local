@@ -2,7 +2,9 @@
 # 适用于本地已有构建好的 agents-Aipyq/dist 的情况
 
 # Base for all builds
-FROM node:20-alpine AS base-min
+# 临时使用镜像代理前缀以解决 buildx 网络问题（buildx 不经过 Docker daemon 的镜像加速器）
+# 如果网络正常，可以改回 node:20-alpine
+FROM docker.m.daocloud.io/library/node:20-alpine AS base-min
 # Install jemalloc
 RUN apk add --no-cache jemalloc
 # Set environment variable to use jemalloc

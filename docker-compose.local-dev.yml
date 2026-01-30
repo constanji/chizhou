@@ -1,0 +1,66 @@
+# 本地开发模式 - 仅启动数据库服务
+# 用于本地运行 npm run backend:dev 时提供数据库支持
+# 使用方法: docker compose -f docker-compose.local-dev.yml up -d
+
+name: chizhou-local-dev
+
+services:
+  # MongoDB 数据库
+  mongodb:
+    container_name: chizhou-mongodb-local
+    image: mongo
+    restart: unless-stopped
+    ports:
+      - "27027:27017"  # 映射到本地 27027，供本地后端连接（匹配 .env 中的 MONGO_URI）
+    volumes:
+      - ./data-node:/data/db
+    command: mongod --noauth
+    networks:
+      - chizhou-local-network
+
+  # Meilisearch 搜索服务（可选）
+  # 如果 .env 中设置了 SEARCH=false，可以注释掉此服务以节省资源
+  # 如果启用了搜索功能（SEARCH=true），则需要启动此服务
+  meilisearch:
+    container_name: chizhou-meilisearch-local
+    image: getmeili/meilisearch:v1.12.3
+    restart: unless-stopped
+    ports:
+      - "7700:7700"  # 映射到本地 7700，供本地后端连接
+    environment:
+      - MEILI_HOST=http://localhost:7700
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_MASTER_KEY=  # 开发环境可以留空
+    volumes:
+      - ./meili_data_v1.12:/meili_data
+    networks:
+      - chizhou-local-network
+
+  # PostgreSQL 向量数据库（可选，如果需要 RAG 功能）
+  vectordb:
+    container_name: chizhou-vectordb-local
+    image: pgvector/pgvector:0.8.0-pg15-trixie
+    ports:
+      - "5234:5432"  # 映射到本地 5234，供本地后端连接
+    environment:
+      POSTGRES_DB: Chizhou
+      POSTGRES_USER: Chizhou
+      POSTGRES_PASSWORD: Chizhou
+    restart: unless-stopped
+    networks:
+      - chizhou-local-network
+    volumes:
+      - pgdata-chizhou-local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U Chizhou -d Chizhou"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  chizhou-local-network:
+    driver: bridge
+
+volumes:
+  pgdata-chizhou-local:
