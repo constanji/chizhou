@@ -86,7 +86,6 @@ class TextChunker {
 class WordParseService {
   constructor() {
     this.WordExtractor = null;
-    this.mammoth = null;
     this.initialized = false;
     this.useWordExtractor = false;
   }
@@ -105,7 +104,7 @@ class WordParseService {
       this.initialized = true;
     } catch (error) {
       throw new Error(
-        "Word解析库未安装。请安装：npm install mammoth 或 npm install word-extractor",
+        "Word解析库未安装。请运行 'npm install word-extractor' 来安装该依赖。",
       );
     }
   }
