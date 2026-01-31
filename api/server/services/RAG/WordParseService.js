@@ -228,49 +228,85 @@ class WordParseService {
       logger.warn(`[WordParseService] 检测到超大文本 (${(textLength / 1024 / 1024).toFixed(2)}MB)，将使用优化的分块策略`);
     }
 
-    while (startIndex < text.length) {
-      let endIndex = Math.min(startIndex + chunkSize, text.length);
+    // 缓存 text.length，避免重复访问
+    const textLen = text.length;
+    let processedChunks = 0;
+    let lastStartIndex = -1; // 用于检测无限循环
+    let consecutiveEmptyChunks = 0; // 连续空 chunks 计数
+    let iterationCount = 0; // 迭代计数器
+    const MAX_ITERATIONS = Math.max(100000, textLen / chunkSize * 2); // 最大迭代次数（安全上限）
+
+    logger.info(`[WordParseService] 开始分块: 文本长度=${textLen}, chunkSize=${chunkSize}, 最大迭代次数=${MAX_ITERATIONS}`);
+
+    while (startIndex < textLen) {
+      iterationCount++;
+      
+      // 防止无限循环：检查迭代次数
+      if (iterationCount > MAX_ITERATIONS) {
+        logger.error(`[WordParseService] 达到最大迭代次数 ${MAX_ITERATIONS}，停止分块！startIndex=${startIndex}, textLen=${textLen}, chunks.length=${chunks.length}`);
+        break;
+      }
+      
+      // 防止无限循环：检查 startIndex 是否卡住
+      if (startIndex === lastStartIndex) {
+        logger.error(`[WordParseService] 检测到无限循环！startIndex=${startIndex}, textLen=${textLen}, chunks.length=${chunks.length}, iteration=${iterationCount}`);
+        // 强制推进至少 chunkSize 个字符
+        startIndex = Math.min(startIndex + chunkSize, textLen);
+        if (startIndex >= textLen) break;
+        lastStartIndex = startIndex;
+        continue;
+      }
+      lastStartIndex = startIndex;
+
+      let endIndex = Math.min(startIndex + chunkSize, textLen);
+      
+      // 防止 endIndex 等于 startIndex（会导致无限循环）
+      if (endIndex <= startIndex) {
+        logger.warn(`[WordParseService] endIndex <= startIndex, 强制推进: startIndex=${startIndex}, endIndex=${endIndex}`);
+        endIndex = startIndex + 1;
+        if (endIndex > textLen) break;
+      }
+      
       // 使用 substring 而不是 slice，减少内存占用（对于大文本）
       let chunkText = text.substring(startIndex, endIndex);
+      let finalChunk = null;
+      let foundSeparator = false;
 
       // 如果不是最后一块，尝试在合适的分隔符位置断开
-      if (endIndex < text.length) {
-        let bestSeparatorIndex = -1;
-        let bestSeparatorLength = 0;
-
-        // 按优先级查找分隔符
+      if (endIndex < textLen && chunkText.length > 0) {
+        // 优化：只在 chunkText 中查找，避免对整个 text 操作
         for (const separator of separators) {
           if (separator === '') {
-            bestSeparatorIndex = endIndex;
-            bestSeparatorLength = 0;
+            // 空分隔符是最后手段，直接使用当前 chunk
             break;
           }
 
           const index = chunkText.lastIndexOf(separator);
           if (index !== -1 && index > chunkText.length * 0.3) {
             // 只在块的后 70% 部分查找，避免块太小
-            const separatorEnd = index + separator.length;
-            if (separatorEnd > bestSeparatorIndex) {
-              bestSeparatorIndex = separatorEnd;
-              bestSeparatorLength = separator.length;
-            }
+            finalChunk = chunkText.substring(0, index + separator.length).trim();
+            endIndex = startIndex + index + separator.length;
+            foundSeparator = true;
+            break;
           }
-        }
-
-        if (bestSeparatorIndex !== -1) {
-          endIndex = startIndex + bestSeparatorIndex;
-          chunkText = text.substring(startIndex, endIndex);
         }
       }
 
-      chunkText = chunkText.trim();
-      if (chunkText.length > 0) {
+      // 如果没有找到合适的分隔符，使用原始 chunk
+      if (!foundSeparator) {
+        finalChunk = chunkText.trim();
+      }
+
+      // 立即清理 chunkText（不再需要）
+      chunkText = '';
+
+      if (finalChunk && finalChunk.length > 0) {
         // 🔥 防御式：再次 sanitize（确保没有 NUL 字符）
-        chunkText = this.sanitizeText(chunkText);
+        const sanitizedChunk = this.sanitizeText(finalChunk);
         
-        if (chunkText.length > 0) {
+        if (sanitizedChunk.length > 0) {
           chunks.push({
-            text: chunkText,
+            text: sanitizedChunk,
             metadata: {
               ...fileMetadata,
               chunk_index: chunks.length,
@@ -278,22 +314,57 @@ class WordParseService {
               parse_method: fileMetadata.parse_method || 'word-extractor',
             },
           });
+          
+          processedChunks++;
+          consecutiveEmptyChunks = 0; // 重置计数器
+          
+          // 每处理一定数量的 chunks 就触发 GC（降低阈值，对所有文件都触发）
+          if (global.gc && processedChunks % 50 === 0) {
+            global.gc();
+          }
+        }
+        
+        // 清理
+        finalChunk = '';
+        sanitizedChunk = '';
+      } else {
+        // 空 chunk，增加计数器
+        consecutiveEmptyChunks++;
+        finalChunk = '';
+        
+        // 如果连续多个空 chunks，可能有问题，强制推进
+        if (consecutiveEmptyChunks > 10) {
+          logger.warn(`[WordParseService] 连续 ${consecutiveEmptyChunks} 个空 chunks，强制推进 startIndex`);
+          startIndex = endIndex;
+          consecutiveEmptyChunks = 0;
+          continue;
         }
       }
 
       // 移动到下一个块的起始位置（考虑重叠）
-      if (chunks.length > 0) {
-        const overlapStart = Math.max(0, endIndex - chunkOverlap);
-        startIndex = overlapStart;
-      } else {
-        startIndex = endIndex;
+      // 关键：无论是否有 chunks，都要确保 startIndex 前进
+      const nextStartIndex = chunks.length > 0 
+        ? Math.max(0, endIndex - chunkOverlap)
+        : endIndex;
+      
+      // 强制确保 startIndex 至少前进 1 个字符（防止无限循环）
+      startIndex = Math.max(nextStartIndex, startIndex + 1);
+      
+      // 防止无限循环：如果 startIndex 没有变化，强制推进
+      if (startIndex === lastStartIndex) {
+        logger.warn(`[WordParseService] startIndex 未变化，强制推进: ${startIndex} -> ${Math.min(startIndex + chunkSize, textLen)}`);
+        startIndex = Math.min(startIndex + chunkSize, textLen);
       }
 
-      // 防止无限循环
-      if (startIndex >= text.length) break;
-      if (startIndex === endIndex && endIndex < text.length) {
-        startIndex = endIndex;
-      }
+      // 检查是否完成
+      if (startIndex >= textLen) break;
+    }
+
+    logger.info(`[WordParseService] 分块完成: 迭代次数=${iterationCount}, 生成chunks=${chunks.length}, 最终startIndex=${startIndex}, textLen=${textLen}`);
+    
+    // 最终 GC
+    if (global.gc) {
+      global.gc();
     }
 
     return chunks;
@@ -320,13 +391,36 @@ class WordParseService {
       logger.info('[WordParseService] 开始解析Word文件');
       const parseResult = await this.parseWord(wordPathOrBuffer);
       
+      // 检查文本大小，提前发现问题
+      const originalText = parseResult.text;
+      const originalTextLength = originalText ? originalText.length : 0;
+      logger.info(`[WordParseService] 解析后文本长度: ${originalTextLength} 字符 (${(originalTextLength * 2 / 1024 / 1024).toFixed(2)}MB)`);
+      
       // 2. 🔥 先做 UTF-8 / NUL 清洗（必须在处理之前）
       logger.info('[WordParseService] 开始 sanitize 文本（清理 NUL 字符）');
-      const sanitizedText = this.sanitizeText(parseResult.text);
+      let sanitizedText = this.sanitizeText(originalText);
+      
+      // 立即触发 GC（如果可用），释放原始文本内存
+      if (global.gc && originalTextLength > 10 * 1024 * 1024) { // 10MB 文本
+        global.gc();
+        logger.info('[WordParseService] 已触发 GC 释放解析后的文本内存');
+      }
       
       // 3. 语义级清理文本（页眉页脚、页码等）
       logger.info('[WordParseService] 开始清理文本（语义级）');
-      const cleanedText = this.cleanText(sanitizedText);
+      let cleanedText = this.cleanText(sanitizedText);
+      
+      // 清理 sanitizedText 引用（通过重新赋值）
+      const cleanedTextLength = cleanedText.length;
+      logger.info(`[WordParseService] 清理后文本长度: ${cleanedTextLength} 字符 (${(cleanedTextLength * 2 / 1024 / 1024).toFixed(2)}MB)`);
+      
+      // 清理 sanitizedText（设置为空字符串，帮助 GC）
+      sanitizedText = '';
+      
+      // 对于超大文本，提前触发 GC
+      if (global.gc && cleanedTextLength > 10 * 1024 * 1024) {
+        global.gc();
+      }
 
       // 4. 分块（chunkText 内部会再次 sanitize 防御）
       const {
@@ -335,7 +429,7 @@ class WordParseService {
         fileMetadata = {},
       } = options;
 
-      logger.info(`[WordParseService] 开始分块: chunkSize=${chunkSize}, chunkOverlap=${chunkOverlap}`);
+      logger.info(`[WordParseService] 开始分块: chunkSize=${chunkSize}, chunkOverlap=${chunkOverlap}, 文本长度=${cleanedTextLength}`);
       const chunks = this.chunkText(cleanedText, {
         chunkSize,
         chunkOverlap,
@@ -346,6 +440,15 @@ class WordParseService {
       });
 
       logger.info(`[WordParseService] Word解析完成: ${chunks.length} 个块`);
+      
+      // 清理 cleanedText 引用（设置为空字符串）
+      cleanedText = '';
+      
+      // 最终 GC
+      if (global.gc) {
+        global.gc();
+      }
+      
       return chunks;
     } catch (error) {
       logger.error('[WordParseService] Word解析失败:', error);
