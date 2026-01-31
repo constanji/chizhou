@@ -1,19 +1,18 @@
+# 本地完整部署配置 - 避免与 chizhou-local-dev 冲突
+# 使用方法: docker compose -f deploy-compose.local.yml up -d
+
 services:
   api:
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
     image: chizhou:latest  # 使用已加载的镜像
-    container_name: Chizhou-API
+    container_name: Chizhou-API-Local
     ports:
       - 3080:3080
     depends_on:
       - mongodb
       - vectordb
-      # - rag_api  # 如果 RAG 镜像不可用，可以注释掉这行
     restart: always
     networks:
-      - chizhou-network
+      - chizhou-deploy-network
     extra_hosts:
     - "host.docker.internal:host-gateway"
     env_file:
@@ -32,8 +31,6 @@ services:
       - VECTOR_DB_NAME=Chizhou
       - VECTOR_DB_USER=Chizhou
       - VECTOR_DB_PASSWORD=Chizhou
-      # - RAG_PORT=${RAG_PORT:-8000}  # 如果禁用 RAG，注释这些
-      # - RAG_API_URL=http://rag_api:${RAG_PORT:-8000}
     volumes:
       - type: bind
         source: ./Chizhou.yaml
@@ -41,84 +38,77 @@ services:
       # specs 已包含在镜像中，不需要 volume mount
       # - ./specs:/app/specs
       # images 是运行时数据（用户上传），保留 volume mount
-      - ./images:/app/client/public/images
-      - ./uploads:/app/uploads
-      - ./logs:/app/api/logs
+      # 使用不同的目录避免与 local-dev 冲突
+      - ./images-deploy:/app/client/public/images
+      - ./uploads-deploy:/app/uploads
+      - ./logs-deploy:/app/api/logs
 
   client:
     image: nginx:1.27.0-alpine
-    container_name: Chizhou-NGINX
+    container_name: Chizhou-NGINX-Local
     ports:
-      - 80:80
-      - 443:443
+      - 8080:80  # 使用 8080 避免与常用端口冲突
+      - 8443:443
     depends_on:
       - api
     restart: always
     networks:
-      - chizhou-network
+      - chizhou-deploy-network
     volumes:
       - ./client/nginx.conf:/etc/nginx/conf.d/default.conf
       
   mongodb:
-    container_name: pyqchat-mongodb
-    # ports:  # Uncomment this to access mongodb from outside docker, not safe in deployment
-    #   - 27018:27017
+    container_name: chizhou-mongodb-deploy  # 不同的容器名
     image: mongo
     restart: always
     networks:
-      - chizhou-network
+      - chizhou-deploy-network
     volumes:
-      - ./data-node:/data/db
+      # 使用不同的数据目录避免与 local-dev 冲突
+      - ./data-node-deploy:/data/db
     command: mongod --noauth
+    # 不映射端口到宿主机，只在容器网络内使用
+    
   meilisearch:
-    container_name: chat-meilisearch
+    container_name: chizhou-meilisearch-deploy  # 不同的容器名
     image: getmeili/meilisearch:v1.12.3
     restart: always
     networks:
-      - chizhou-network
-    # ports: # Uncomment this to access meilisearch from outside docker
-    #   - 7700:7700 # if exposing these ports, make sure your master key is not the default value
+      - chizhou-deploy-network
     env_file:
       - .env
     environment:
       - MEILI_HOST=http://meilisearch:7700
       - MEILI_NO_ANALYTICS=true
     volumes:
-      - ./meili_data_v1.12:/meili_data
+      # 使用不同的数据目录避免与 local-dev 冲突
+      - ./meili_data_deploy:/meili_data
+    # 不映射端口到宿主机，只在容器网络内使用
+    
   vectordb:  # PG向量数据库，主要用于 RAG
-    container_name: vectordb
+    container_name: chizhou-vectordb-deploy  # 不同的容器名
     image: pgvector/pgvector:0.8.0-pg15-trixie
     ports:
-      - "5234:5432"  # 映射外部端口5234到容器内端口5432
+      - "5235:5432"  # 使用 5235 避免与 local-dev 的 5234 冲突
     environment:
       POSTGRES_DB: Chizhou
       POSTGRES_USER: Chizhou
       POSTGRES_PASSWORD: Chizhou
     restart: always
     networks:
-      - chizhou-network
+      - chizhou-deploy-network
     volumes:
-      - pgdata-chizhou:/var/lib/postgresql/data
+      - pgdata-chizhou-deploy:/var/lib/postgresql/data  # 不同的卷名
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U Chizhou -d Chizhou"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-  # rag_api:  # 如果镜像不可用或不需要 RAG 功能，可以注释掉整个服务
-  #   image: ghcr.io/constanji/aipyq-rag-api-dev-lite:latest
-  #   environment:
-  #     - DB_HOST=vectordb
-  #     - RAG_PORT=${RAG_PORT:-8000}
-  #   restart: always
-  #   depends_on:
-  #     - vectordb
-  #   env_file:
-  #     - .env
 
 networks:
-  chizhou-network:
+  chizhou-deploy-network:  # 不同的网络名
     driver: bridge
 
 volumes:
-  pgdata-chizhou:  # 使用独立的卷名，避免与BecauseCha冲突
+  pgdata-chizhou-deploy:  # 不同的卷名，避免与 local-dev 冲突

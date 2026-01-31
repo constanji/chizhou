@@ -303,9 +303,18 @@ class PDFParseService {
       '',          // 字符边界（最后手段）
     ];
 
+    // 对于超大文本，使用更高效的内存管理
+    const textLength = text.length;
+    const MAX_TEXT_LENGTH = 50 * 1024 * 1024; // 50MB 文本阈值
+    
+    if (textLength > MAX_TEXT_LENGTH) {
+      logger.warn(`[PDFParseService] 检测到超大文本 (${(textLength / 1024 / 1024).toFixed(2)}MB)，将使用优化的分块策略`);
+    }
+
     while (startIndex < text.length) {
       let endIndex = Math.min(startIndex + chunkSize, text.length);
-      let chunkText = text.slice(startIndex, endIndex);
+      // 使用 substring 而不是 slice，减少内存占用（对于大文本）
+      let chunkText = text.substring(startIndex, endIndex);
 
       // 如果不是最后一块，尝试在合适的分隔符位置断开
       if (endIndex < text.length) {
@@ -333,7 +342,7 @@ class PDFParseService {
 
         if (bestSeparatorIndex !== -1) {
           endIndex = startIndex + bestSeparatorIndex;
-          chunkText = text.slice(startIndex, endIndex);
+          chunkText = text.substring(startIndex, endIndex);
         }
       }
 

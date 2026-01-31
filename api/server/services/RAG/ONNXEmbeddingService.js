@@ -232,9 +232,10 @@ class ONNXEmbeddingService {
       await this.initialize();
     }
 
+    let output = null;
     try {
       // 使用 pipeline 进行特征提取
-      const output = await this.pipeline(text, {
+      output = await this.pipeline(text, {
         pooling: 'mean', // 使用 mean pooling
         normalize: true, // 归一化向量
       });
@@ -242,21 +243,51 @@ class ONNXEmbeddingService {
       // 提取嵌入向量
       let embedding;
       if (output && output.data) {
-        // 如果是 Tensor 对象
+        // 如果是 Tensor 对象，立即转换为数组并释放 Tensor
         embedding = Array.from(output.data);
+        // 如果 output 有 dispose 方法（某些 Tensor 库），调用它释放内存
+        if (typeof output.dispose === 'function') {
+          output.dispose();
+        }
       } else if (Array.isArray(output)) {
-        // 如果是数组
+        // 如果是数组，直接使用
         embedding = output;
       } else if (typeof output === 'object' && 'data' in output) {
         // 尝试获取 data 属性
         embedding = Array.from(output.data);
+        // 如果 output 有 dispose 方法，调用它释放内存
+        if (typeof output.dispose === 'function') {
+          output.dispose();
+        }
       } else {
         throw new Error('Unexpected output format from embedding model');
+      }
+
+      // 显式清理 output 引用（虽然作用域结束后会自动回收）
+      output = null;
+      
+      // 对于大量向量化任务，定期触发GC有助于释放ONNX模型的中间缓存
+      // 注意：频繁GC可能影响性能，但对于内存敏感的场景是必要的
+      if (global.gc) {
+        // 使用计数器，每10次向量化触发一次GC（避免过于频繁）
+        if (!this._gcCounter) {
+          this._gcCounter = 0;
+        }
+        this._gcCounter++;
+        if (this._gcCounter % 10 === 0) {
+          global.gc();
+          logger.debug(`[ONNXEmbeddingService] Triggered GC after ${this._gcCounter} embeddings`);
+        }
       }
 
       logger.debug(`[ONNXEmbeddingService] Generated embedding with dimension: ${embedding.length}`);
       return embedding;
     } catch (error) {
+      // 确保在错误情况下也清理 output
+      if (output && typeof output.dispose === 'function') {
+        output.dispose();
+      }
+      output = null;
       logger.error('[ONNXEmbeddingService] Error embedding text:', error);
       throw new Error(`ONNX embedding failed: ${error.message}`);
     }

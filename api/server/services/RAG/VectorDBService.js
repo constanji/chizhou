@@ -721,66 +721,197 @@ class VectorDBService {
         [fileId]
       );
 
-      // 批量插入文件向量
-      const insertPromises = chunks.map(async (chunk, index) => {
-        const embedding = embeddings[index];
-        if (!embedding || !Array.isArray(embedding)) {
-          logger.warn(`[VectorDBService] 跳过无效的向量: chunk ${index}`);
-          return;
-        }
-
-        const actualDimension = embedding.length;
-        const expectedDimension = this.config.embeddingDimension;
+      // 分批插入文件向量，避免同时创建大量 Promise 导致内存峰值
+      // 对于大量 chunks，分批执行可以显著减少内存占用
+      const INSERT_BATCH_SIZE = 20; // 每批插入20个向量
+      
+      for (let i = 0; i < chunks.length; i += INSERT_BATCH_SIZE) {
+        const batchEnd = Math.min(i + INSERT_BATCH_SIZE, chunks.length);
+        const batchPromises = [];
         
-        if (actualDimension !== expectedDimension) {
-          logger.warn(`[VectorDBService] 向量维度不匹配: chunk ${index}, got ${actualDimension}, expected ${expectedDimension}`);
-          return;
-        }
-
-        const embeddingStr = `[${embedding.join(',')}]`;
-        // 修复文件名编码问题，并清理 metadata 中的所有字符串字段
-        const { fixFilenameEncoding } = require('~/server/utils/files');
-        let filename = chunk.metadata?.filename || chunk.metadata?.source?.split('/').pop() || '';
-        filename = fixFilenameEncoding(filename);
-        
-        // 清理 metadata 中的所有字符串值，移除无效字符并修复编码
-        const cleanMetadata = {};
-        for (const [key, value] of Object.entries(chunk.metadata || {})) {
-          if (typeof value === 'string') {
-            // 修复编码并移除 null 字符
-            cleanMetadata[key] = fixFilenameEncoding(value).replace(/\u0000/g, '');
-          } else {
-            cleanMetadata[key] = value;
+        for (let j = i; j < batchEnd; j++) {
+          const chunk = chunks[j];
+          const embedding = embeddings[j];
+          
+          if (!embedding || !Array.isArray(embedding)) {
+            logger.warn(`[VectorDBService] 跳过无效的向量: chunk ${j}`);
+            continue;
           }
-        }
-        cleanMetadata.entity_id = entityId;
-        cleanMetadata.filename = filename;
-        
-        // 将清理后的 metadata 转换为 JSON 字符串
-        // PostgreSQL JSONB 需要有效的 JSON 字符串
-        const metadataJson = JSON.stringify(cleanMetadata);
-        
-        await this.pool.query(
-          `INSERT INTO file_vectors 
-           (file_id, user_id, entity_id, chunk_index, content, embedding, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6::vector, $7::jsonb)`,
-          [
-            fileId,
-            userId,
-            entityId || null,
-            index,
-            chunk.text,
-            embeddingStr,
-            metadataJson,
-          ]
-        );
-      });
 
-      await Promise.all(insertPromises);
+          const actualDimension = embedding.length;
+          const expectedDimension = this.config.embeddingDimension;
+          
+          if (actualDimension !== expectedDimension) {
+            logger.warn(`[VectorDBService] 向量维度不匹配: chunk ${j}, got ${actualDimension}, expected ${expectedDimension}`);
+            continue;
+          }
+
+          const embeddingStr = `[${embedding.join(',')}]`;
+          // 修复文件名编码问题，并清理 metadata 中的所有字符串字段
+          const { fixFilenameEncoding } = require('~/server/utils/files');
+          let filename = chunk.metadata?.filename || chunk.metadata?.source?.split('/').pop() || '';
+          filename = fixFilenameEncoding(filename);
+          
+          // 清理 metadata 中的所有字符串值，移除无效字符并修复编码
+          const cleanMetadata = {};
+          for (const [key, value] of Object.entries(chunk.metadata || {})) {
+            if (typeof value === 'string') {
+              // 修复编码并移除 null 字符
+              cleanMetadata[key] = fixFilenameEncoding(value).replace(/\u0000/g, '');
+            } else {
+              cleanMetadata[key] = value;
+            }
+          }
+          cleanMetadata.entity_id = entityId;
+          cleanMetadata.filename = filename;
+          
+          // 将清理后的 metadata 转换为 JSON 字符串
+          // PostgreSQL JSONB 需要有效的 JSON 字符串
+          const metadataJson = JSON.stringify(cleanMetadata);
+          
+          batchPromises.push(
+            this.pool.query(
+              `INSERT INTO file_vectors 
+               (file_id, user_id, entity_id, chunk_index, content, embedding, metadata)
+               VALUES ($1, $2, $3, $4, $5, $6::vector, $7::jsonb)`,
+              [
+                fileId,
+                userId,
+                entityId || null,
+                j,
+                chunk.text,
+                embeddingStr,
+                metadataJson,
+              ]
+            )
+          );
+        }
+        
+        // 等待当前批次完成
+        await Promise.all(batchPromises);
+        
+        // 清理批次 Promise 数组
+        batchPromises.length = 0;
+        
+        // 每处理一定数量的批次后，触发 GC（如果可用）
+        if (global.gc && (i / INSERT_BATCH_SIZE) % 5 === 0) {
+          global.gc();
+        }
+      }
       logger.info(`[VectorDBService] 成功存储 ${chunks.length} 个文件向量块到 file_vectors 表: fileId=${fileId}`);
       return true;
     } catch (error) {
       logger.error('[VectorDBService] 存储文件向量失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 增量存储文件向量（不删除旧数据，用于分批处理）
+   * @param {Object} params
+   * @param {string} params.fileId - 文件ID
+   * @param {string} params.userId - 用户ID
+   * @param {string} [params.entityId] - 实体ID
+   * @param {Array} params.chunks - 文本块数组
+   * @param {Array} params.embeddings - 向量数组
+   * @param {number} [params.startChunkIndex] - 起始chunk索引（用于分批处理）
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async storeFileVectorsIncremental({ fileId, userId, entityId, chunks, embeddings, startChunkIndex = 0 }) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      if (!chunks || chunks.length === 0) {
+        logger.warn('[VectorDBService] 没有文本块需要存储（增量）');
+        return false;
+      }
+
+      if (chunks.length !== embeddings.length) {
+        throw new Error(`文本块数量(${chunks.length})与向量数量(${embeddings.length})不匹配`);
+      }
+
+      // 分批增量插入文件向量（不删除旧数据），避免同时创建大量 Promise
+      const INSERT_BATCH_SIZE = 20; // 每批插入20个向量
+      
+      for (let i = 0; i < chunks.length; i += INSERT_BATCH_SIZE) {
+        const batchEnd = Math.min(i + INSERT_BATCH_SIZE, chunks.length);
+        const batchPromises = [];
+        
+        for (let j = i; j < batchEnd; j++) {
+          const chunk = chunks[j];
+          const globalIndex = startChunkIndex + j;
+          const embedding = embeddings[j];
+          
+          if (!embedding || !Array.isArray(embedding)) {
+            logger.warn(`[VectorDBService] 跳过无效的向量: chunk ${globalIndex}`);
+            continue;
+          }
+
+          const actualDimension = embedding.length;
+          const expectedDimension = this.config.embeddingDimension;
+          
+          if (actualDimension !== expectedDimension) {
+            logger.warn(`[VectorDBService] 向量维度不匹配: chunk ${globalIndex}, got ${actualDimension}, expected ${expectedDimension}`);
+            continue;
+          }
+
+          const embeddingStr = `[${embedding.join(',')}]`;
+          // 修复文件名编码问题，并清理 metadata 中的所有字符串字段
+          const { fixFilenameEncoding } = require('~/server/utils/files');
+          let filename = chunk.metadata?.filename || chunk.metadata?.source?.split('/').pop() || '';
+          filename = fixFilenameEncoding(filename);
+          
+          // 清理 metadata 中的所有字符串值，移除无效字符并修复编码
+          const cleanMetadata = {};
+          for (const [key, value] of Object.entries(chunk.metadata || {})) {
+            if (typeof value === 'string') {
+              // 修复编码并移除 null 字符
+              cleanMetadata[key] = fixFilenameEncoding(value).replace(/\u0000/g, '');
+            } else {
+              cleanMetadata[key] = value;
+            }
+          }
+          cleanMetadata.entity_id = entityId;
+          cleanMetadata.filename = filename;
+          
+          // 将清理后的 metadata 转换为 JSON 字符串
+          const metadataJson = JSON.stringify(cleanMetadata);
+          
+          batchPromises.push(
+            this.pool.query(
+              `INSERT INTO file_vectors 
+               (file_id, user_id, entity_id, chunk_index, content, embedding, metadata)
+               VALUES ($1, $2, $3, $4, $5, $6::vector, $7::jsonb)`,
+              [
+                fileId,
+                userId,
+                entityId || null,
+                globalIndex,
+                chunk.text,
+                embeddingStr,
+                metadataJson,
+              ]
+            )
+          );
+        }
+        
+        // 等待当前批次完成
+        await Promise.all(batchPromises);
+        
+        // 清理批次 Promise 数组
+        batchPromises.length = 0;
+        
+        // 每处理一定数量的批次后，触发 GC（如果可用）
+        if (global.gc && (i / INSERT_BATCH_SIZE) % 5 === 0) {
+          global.gc();
+        }
+      }
+      logger.info(`[VectorDBService] 成功增量存储 ${chunks.length} 个文件向量块到 file_vectors 表: fileId=${fileId}, startIndex=${startChunkIndex}`);
+      return true;
+    } catch (error) {
+      logger.error('[VectorDBService] 增量存储文件向量失败:', error);
       throw error;
     }
   }

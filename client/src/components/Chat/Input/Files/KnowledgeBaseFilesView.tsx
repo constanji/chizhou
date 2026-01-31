@@ -45,8 +45,14 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
   const uploadFileMutation = useUploadFileMutation({
     onSuccess: async (fileData: TFile) => {
       try {
+        console.log('[KnowledgeBaseFilesView] 文件上传成功，开始添加到知识库:', {
+          file_id: fileData.file_id,
+          filename: fileData.filename,
+          user_id: user?.id,
+        });
+        
         // 文件上传成功后，添加到知识库
-        await addKnowledgeMutation.mutateAsync({
+        const result = await addKnowledgeMutation.mutateAsync({
           type: KnowledgeType.BUSINESS_KNOWLEDGE,
           data: {
             fileId: fileData.file_id,
@@ -55,13 +61,21 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
             category: selectedCategory || undefined,
           },
         });
+        
+        console.log('[KnowledgeBaseFilesView] 知识条目创建成功:', result);
+        
         showToast({
           message: '文件上传并向量化成功',
           status: 'success',
         });
         setSelectedCategory(''); // 重置选择的分类
-        refetch();
+        
+        // 等待一小段时间确保数据已写入，然后刷新列表
+        setTimeout(() => {
+          refetch();
+        }, 500);
       } catch (error: any) {
+        console.error('[KnowledgeBaseFilesView] 添加到知识库失败:', error);
         showToast({
           message: `添加到知识库失败: ${error.message || '未知错误'}`,
           status: 'error',
@@ -69,6 +83,7 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
       }
     },
     onError: (error: any) => {
+      console.error('[KnowledgeBaseFilesView] 文件上传失败:', error);
       showToast({
         message: `文件上传失败: ${error.message || '未知错误'}`,
         status: 'error',
@@ -137,7 +152,7 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
     setNewCategoryName('');
   };
 
-  const handleSaveFolder = () => {
+  const handleSaveFolder = async () => {
     if (!newCategoryName.trim()) {
       showToast({
         message: '文件夹名称不能为空',
@@ -145,14 +160,42 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
       });
       return;
     }
-    setShowCreateFolderModal(false);
-    setNewCategoryName('');
-    // 展开新创建的文件夹
-    setExpandedCategories(prev => new Set(prev).add(newCategoryName.trim()));
-    showToast({
-      message: `文件夹 "${newCategoryName.trim()}" 已创建`,
-      status: 'success',
-    });
+    
+    const folderName = newCategoryName.trim();
+    
+    try {
+      // 创建一个占位符知识条目来创建文件夹（空文件夹）
+      await addKnowledgeMutation.mutateAsync({
+        type: KnowledgeType.BUSINESS_KNOWLEDGE,
+        data: {
+          title: `文件夹: ${folderName}`,
+          content: '', // 空内容，仅用于创建文件夹
+          category: folderName,
+        },
+      });
+      
+      setShowCreateFolderModal(false);
+      setNewCategoryName('');
+      
+      // 展开新创建的文件夹
+      setExpandedCategories(prev => new Set(prev).add(folderName));
+      
+      showToast({
+        message: `文件夹 "${folderName}" 已创建`,
+        status: 'success',
+      });
+      
+      // 刷新列表
+      setTimeout(() => {
+        refetch();
+      }, 500);
+    } catch (error: any) {
+      console.error('[KnowledgeBaseFilesView] 创建文件夹失败:', error);
+      showToast({
+        message: `创建文件夹失败: ${error.message || '未知错误'}`,
+        status: 'error',
+      });
+    }
   };
 
   const handleStartEditCategory = (category: string) => {
@@ -247,9 +290,25 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
     }
   }, [knowledgeList, isLoading]);
   
-  // 按分类分组文件
+  // 收集所有分类（包括空文件夹）
+  const allCategories = new Set<string>();
+  files.forEach(entry => {
+    const category = entry.metadata?.category || '未分类';
+    allCategories.add(category);
+  });
+
+  // 按分类分组文件，过滤掉文件夹占位符条目（标题以"文件夹:"开头的空条目）
   const groupedFiles = files.reduce((acc, entry) => {
     const category = entry.metadata?.category || '未分类';
+    // 跳过文件夹占位符条目（标题以"文件夹:"开头且没有文件ID的条目）
+    const isFolderPlaceholder = entry.title.startsWith('文件夹:') && !entry.metadata?.file_id && (!entry.content || entry.content.trim() === '');
+    if (isFolderPlaceholder) {
+      // 只创建分类，不添加条目
+      if (!acc[category]) {
+        acc[category] = [];
+      }
+      return acc;
+    }
     if (!acc[category]) {
       acc[category] = [];
     }
@@ -257,8 +316,15 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
     return acc;
   }, {} as Record<string, KnowledgeEntry[]>);
 
-  // 按分类名称排序
-  const sortedCategories = Object.keys(groupedFiles).sort((a, b) => {
+  // 确保所有分类都有条目（包括空文件夹）
+  allCategories.forEach(category => {
+    if (!groupedFiles[category]) {
+      groupedFiles[category] = [];
+    }
+  });
+
+  // 按分类名称排序（使用 allCategories 确保空文件夹也能显示）
+  const sortedCategories = Array.from(allCategories).sort((a, b) => {
     if (a === '未分类') return 1;
     if (b === '未分类') return -1;
     return a.localeCompare(b, 'zh-CN');
@@ -570,7 +636,12 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                // 直接设置分类并触发文件选择
                                 setSelectedCategory(category);
+                                // 立即触发文件选择对话框
+                                setTimeout(() => {
+                                  fileInputRef.current?.click();
+                                }, 100);
                               }}
                               className="h-6 w-6 p-0 text-primary"
                               title="在此文件夹上传文件"

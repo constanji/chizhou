@@ -171,4 +171,11 @@ claude-flow
 
 # Deployment unnecessary folders
 
+Sever/
+data-node-deploy/
+logs-deploy/
+uploads-deploy/
+images-deploy/
+meili_data_deploy/
+
 

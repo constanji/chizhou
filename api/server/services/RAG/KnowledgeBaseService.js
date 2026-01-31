@@ -1221,12 +1221,25 @@ class KnowledgeBaseService {
         logger.debug(`[KnowledgeBaseService] Business knowledge linked to file ${fileId}, file already vectorized`);
       }
 
+      // 确保 userId 转换为 ObjectId 格式
+      const mongoose = require('mongoose');
+      let userIdObjectId = userId;
+      if (typeof userId === 'string' && mongoose.connection.readyState === 1) {
+        try {
+          userIdObjectId = new mongoose.Types.ObjectId(userId);
+        } catch (e) {
+          // 如果转换失败，使用原始值
+          userIdObjectId = userId;
+        }
+      }
+      
       const knowledgeEntry = new KnowledgeEntry({
-        user: userId,
+        user: userIdObjectId,
         type: KnowledgeType.BUSINESS_KNOWLEDGE,
         title: decodedTitle,
         content: content || (fileId ? `文档: ${decodedFilename || '已上传文档'}` : ''),
         embedding,
+        parent_id: null, // 明确设置为 null，确保是父级条目
         metadata: {
           category,
           tags: tags || [],
@@ -1710,8 +1723,20 @@ class KnowledgeBaseService {
       const query = {};
 
       // userId改为可选，如果提供则过滤，否则查询所有
+      // 确保 userId 转换为 ObjectId 格式（如果 MongoDB 已连接）
       if (userId) {
-        query.user = userId;
+        const mongoose = require('mongoose');
+        // 如果 userId 是字符串且 MongoDB 已连接，转换为 ObjectId
+        if (typeof userId === 'string' && mongoose.connection.readyState === 1) {
+          try {
+            query.user = new mongoose.Types.ObjectId(userId);
+          } catch (e) {
+            // 如果转换失败，使用原始值（可能是其他格式的ID）
+            query.user = userId;
+          }
+        } else {
+          query.user = userId;
+        }
       }
 
       if (type) {
