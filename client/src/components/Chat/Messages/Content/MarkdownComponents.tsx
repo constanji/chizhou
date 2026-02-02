@@ -3,6 +3,7 @@ import { useRecoilValue } from 'recoil';
 import { useToastContext } from '@aipyq/client';
 import { PermissionTypes, Permissions, apiBaseUrl } from '@aipyq/data-provider';
 import CodeBlock from '~/components/Messages/Content/CodeBlock';
+import WritingPreview from '~/components/Chat/Messages/Content/WritingPreview';
 import useHasAccess from '~/hooks/Roles/useHasAccess';
 import { useFileDownload } from '~/data-provider';
 import { useCodeBlockContext } from '~/Providers';
@@ -24,10 +25,11 @@ export const code: React.ElementType = memo(({ className, children }: TCodeProps
   const match = /language-(\w+)/.exec(className ?? '');
   const lang = match && match[1];
   const isMath = lang === 'math';
+  const isWriting = lang === 'writing';
   const isSingleLine = typeof children === 'string' && children.split('\n').length === 1;
 
   const { getNextIndex, resetCounter } = useCodeBlockContext();
-  const blockIndex = useRef(getNextIndex(isMath || isSingleLine)).current;
+  const blockIndex = useRef(getNextIndex(isMath || isSingleLine || isWriting)).current;
 
   useEffect(() => {
     resetCounter();
@@ -35,6 +37,14 @@ export const code: React.ElementType = memo(({ className, children }: TCodeProps
 
   if (isMath) {
     return <>{children}</>;
+  } else if (isWriting) {
+    // 使用 WritingPreview 组件渲染 writing 代码块
+    const content = typeof children === 'string' 
+      ? children 
+      : Array.isArray(children) 
+        ? children.join('') 
+        : String(children);
+    return <WritingPreview content={content} />;
   } else if (isSingleLine) {
     return (
       <code onDoubleClick={handleDoubleClick} className={className}>
@@ -59,6 +69,14 @@ export const codeNoExecution: React.ElementType = memo(({ className, children }:
 
   if (lang === 'math') {
     return children;
+  } else if (lang === 'writing') {
+    // 使用 WritingPreview 组件渲染 writing 代码块
+    const content = typeof children === 'string' 
+      ? children 
+      : Array.isArray(children) 
+        ? children.join('') 
+        : String(children);
+    return <WritingPreview content={content} />;
   } else if (typeof children === 'string' && children.split('\n').length === 1) {
     return (
       <code onDoubleClick={handleDoubleClick} className={className}>
