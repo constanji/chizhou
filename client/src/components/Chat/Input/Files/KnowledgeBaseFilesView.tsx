@@ -9,6 +9,9 @@ import { useRecoilValue } from 'recoil';
 import store from '~/store';
 import { cn } from '~/utils';
 import { Upload, Trash2, FileText, X, Eye, XCircle, TestTube, Folder, FolderOpen, ChevronRight, ChevronDown, Plus, Pencil, Check } from 'lucide-react';
+import { useDrop } from 'react-dnd';
+import { NativeTypes } from 'react-dnd-html5-backend';
+import { dataService } from '@aipyq/data-provider';
 
 const KnowledgeType = {
   FILE: 'file',
@@ -20,6 +23,8 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
   const { showToast } = useToastContext();
   const user = useRecoilValue(store.user);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingSingleUploadCategoryRef = useRef<string | undefined>(undefined);
+
   const [showRAGTestModal, setShowRAGTestModal] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
@@ -27,7 +32,16 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
+  const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+
+  // “上传到文件夹”弹窗（点击文件夹上传按钮后打开）
+  const folderUploadInputRef = useRef<HTMLInputElement>(null);
+  const [showFolderUploadModal, setShowFolderUploadModal] = useState(false);
+  const [folderUploadCategory, setFolderUploadCategory] = useState<string>('');
+  const [folderUploadFiles, setFolderUploadFiles] = useState<File[]>([]);
+  const [isFolderUploadDragOver, setIsFolderUploadDragOver] = useState(false);
 
   // 查询知识库文件列表（只查询文件类型）
   const { data: knowledgeList, isLoading, refetch } = useGetKnowledgeListQuery({
@@ -58,7 +72,7 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
             fileId: fileData.file_id,
             filename: fileData.filename,
             title: fileData.filename,
-            category: selectedCategory || undefined,
+            category: pendingSingleUploadCategoryRef.current || undefined,
           },
         });
         
@@ -68,7 +82,7 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
           message: '文件上传并向量化成功',
           status: 'success',
         });
-        setSelectedCategory(''); // 重置选择的分类
+        pendingSingleUploadCategoryRef.current = undefined;
         
         // 等待一小段时间确保数据已写入，然后刷新列表
         setTimeout(() => {
@@ -101,17 +115,157 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
     viewingFileId || undefined,
   );
 
+  // 批量上传文件
+  const handleBatchUpload = useCallback(async (files: File[], targetCategory?: string) => {
+    const category = targetCategory || '';
+    const totalFiles = files.length;
+    let successCount = 0;
+    let failCount = 0;
+
+    // 更新上传状态
+    files.forEach(file => {
+      setUploadingFiles(prev => new Set(prev).add(file.name));
+      setUploadProgress(prev => ({ ...prev, [file.name]: 0 }));
+    });
+
+    //串行上传
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('endpoint', 'agents');
+        formData.append('tool_resource', 'file_search');
+
+        // 使用 dataService.uploadFile 而不是 fetch，确保使用正确的请求配置
+        setUploadProgress(prev => ({ ...prev, [file.name]: 50 }));
+        
+        const fileData = await dataService.uploadFile(formData);
+
+        // 添加到知识库
+        await addKnowledgeMutation.mutateAsync({
+          type: KnowledgeType.BUSINESS_KNOWLEDGE,
+          data: {
+            fileId: fileData.file_id,
+            filename: fileData.filename,
+            title: fileData.filename,
+            category: category || undefined,
+          },
+        });
+
+        successCount++;
+        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
+        
+        // 文件上传后延迟，避免连接过快
+        if (i < files.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (error: any) {
+        console.error(`[KnowledgeBaseFilesView] 文件 ${file.name} 上传失败:`, error);
+        failCount++;
+        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
+        
+        // 显示单个文件错误（不中断后续上传）
+        showToast({
+          message: `文件 "${file.name}" 上传失败: ${error.message || '未知错误'}`,
+          status: 'error',
+        });
+      } finally {
+        setUploadingFiles(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(file.name);
+          return newSet;
+        });
+      }
+    }
+
+    // 刷新列表并显示结果
+    setTimeout(() => {
+      refetch();
+      if (successCount > 0) {
+        showToast({
+          message: `成功上传 ${successCount} 个文件${failCount > 0 ? `，失败 ${failCount} 个` : ''}`,
+          status: failCount > 0 ? 'info' : 'success',
+        });
+      } else if (failCount > 0) {
+        showToast({
+          message: `上传失败: ${failCount} 个文件`,
+          status: 'error',
+        });
+      }
+    }, 500);
+  }, [addKnowledgeMutation, refetch, showToast]);
+
+  const openFolderUploadModal = useCallback((category: string) => {
+    setFolderUploadCategory(category);
+    setFolderUploadFiles([]);
+    setIsFolderUploadDragOver(false);
+    setShowFolderUploadModal(true);
+  }, []);
+
+  const closeFolderUploadModal = useCallback(() => {
+    setShowFolderUploadModal(false);
+    setFolderUploadCategory('');
+    setFolderUploadFiles([]);
+    setIsFolderUploadDragOver(false);
+  }, []);
+
+  const handleFolderUploadChooseFiles = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (folderUploadInputRef.current) {
+      folderUploadInputRef.current.value = '';
+    }
+    if (files.length === 0) return;
+    setFolderUploadFiles((prev) => {
+      // 去重：同名同大小视为同一个（简单的策略）
+      const next = [...prev];
+      for (const f of files) {
+        const exists = next.some((x) => x.name === f.name && x.size === f.size && x.lastModified === f.lastModified);
+        if (!exists) next.push(f);
+      }
+      return next;
+    });
+  }, []);
+
+  const confirmFolderUpload = useCallback(async () => {
+    if (!folderUploadCategory) {
+      showToast({ message: '请先选择目标文件夹', status: 'error' });
+      return;
+    }
+    if (folderUploadFiles.length === 0) {
+      showToast({ message: '请先选择要上传的文件，或拖拽文件到此窗口', status: 'error' });
+      return;
+    }
+    const filesToUpload = folderUploadFiles;
+    closeFolderUploadModal();
+    await handleBatchUpload(filesToUpload, folderUploadCategory);
+  }, [folderUploadCategory, folderUploadFiles, handleBatchUpload, closeFolderUploadModal, showToast]);
+
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('endpoint', 'agents');
-    formData.append('tool_resource', 'file_search'); // 使用 file_search 工具资源，会自动向量化
+    // 重置文件选择器
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
 
-    uploadFileMutation.mutate(formData);
-  }, [uploadFileMutation]);
+    // 批量上传
+    if (files.length === 1) {
+      // 单个文件，使用原有逻辑
+      const file = files[0];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('endpoint', 'agents');
+      formData.append('tool_resource', 'file_search');
+
+      pendingSingleUploadCategoryRef.current = undefined;
+      uploadFileMutation.mutate(formData);
+    } else {
+      // 多个文件，使用批量上传
+      handleBatchUpload(files);
+    }
+  }, [uploadFileMutation, handleBatchUpload]);
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -272,6 +426,53 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
     });
   };
 
+  // 拖拽上传的处理函数
+  const handleDropOnFolder = useCallback((category: string, files: File[]) => {
+    setDragOverCategory(null);
+    handleBatchUpload(files, category);
+  }, [handleBatchUpload]);
+
+  //拖拽事件处理
+  const handleFolderDragOver = useCallback((e: React.DragEvent, category: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCategory(category);
+  }, []);
+
+  const handleFolderDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCategory(null);
+  }, []);
+
+  const handleFolderDrop = useCallback((e: React.DragEvent, category: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCategory(null);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      handleDropOnFolder(category, files);
+    }
+  }, [handleDropOnFolder]);
+
+  // 全局拖拽区域（用于整个对话框）
+  const [{ isOver: isOverDialog }, dropDialog] = useDrop(
+    () => ({
+      accept: [NativeTypes.FILE],
+      drop: (item: { files: File[] }) => {
+        if (item.files && item.files.length > 0) {
+          // 如果没有拖拽到特定文件夹，使用当前选择的文件夹或默认
+          handleBatchUpload(item.files);
+        }
+      },
+      collect: (monitor) => ({
+        isOver: monitor.isOver(),
+      }),
+    }),
+    [handleBatchUpload],
+  );
+
   const files = knowledgeList?.data || [];
   
   // 调试日志
@@ -282,7 +483,6 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
         count: knowledgeList.count,
         dataLength: knowledgeList.data?.length || 0,
         isLoading,
-        error: knowledgeList.error,
       });
       if (knowledgeList.data && knowledgeList.data.length > 0) {
         console.log('[KnowledgeBaseFilesView] 第一条数据:', knowledgeList.data[0]);
@@ -347,16 +547,20 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
   return (
     <OGDialog open={open} onOpenChange={onOpenChange}>
       <OGDialogContent
+        ref={dropDialog}
         title="知识库文件管理"
-        className="w-11/12 max-w-6xl bg-background text-text-primary shadow-2xl"
+        className={cn(
+          "w-11/12 max-w-6xl max-h-[90vh] bg-background text-text-primary shadow-2xl flex flex-col",
+          isOverDialog && "ring-2 ring-primary ring-offset-2"
+        )}
       >
-        <OGDialogHeader>
+        <OGDialogHeader className="flex-shrink-0">
           <OGDialogTitle>知识库文件管理</OGDialogTitle>
         </OGDialogHeader>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
           {/* 上传区域 */}
-          <div className="flex items-center justify-between border-b border-border-light pb-4">
+          <div className="flex items-center justify-between border-b border-border-light pb-4 flex-shrink-0">
             <div className="flex items-center gap-2">
               <input
                 ref={fileInputRef}
@@ -364,18 +568,26 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                 className="hidden"
                 onChange={handleFileSelect}
                 accept=".pdf,.doc,.docx,.txt,.md"
+                multiple
                 aria-label="上传文件"
               />
               <Button
                 onClick={handleUploadClick}
-                disabled={uploadFileMutation.isLoading}
+                disabled={uploadFileMutation.isLoading || uploadingFiles.size > 0}
                 className="flex items-center gap-2"
               >
                 <Upload className="h-4 w-4" />
-                {uploadFileMutation.isLoading ? '上传中...' : '上传文件'}
+                {uploadFileMutation.isLoading || uploadingFiles.size > 0 
+                  ? `上传中... (${uploadingFiles.size})` 
+                  : '上传文件'}
               </Button>
-              {uploadFileMutation.isLoading && (
+              {(uploadFileMutation.isLoading || uploadingFiles.size > 0) && (
                 <Spinner className="h-4 w-4" />
+              )}
+              {uploadingFiles.size > 0 && (
+                <div className="text-xs text-text-secondary">
+                  正在上传 {uploadingFiles.size} 个文件...
+                </div>
               )}
               <Button
                 onClick={handleCreateFolder}
@@ -385,19 +597,6 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                 <Plus className="h-4 w-4" />
                 新建文件夹
               </Button>
-              {selectedCategory && (
-                <div className="flex items-center gap-2 text-sm text-text-secondary">
-                  <span>上传到:</span>
-                  <span className="font-medium text-text-primary">{selectedCategory}</span>
-                  <button
-                    onClick={() => setSelectedCategory('')}
-                    className="text-red-500 hover:text-red-700"
-                    aria-label="清除选择"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
             </div>
             <Button
               onClick={() => setShowRAGTestModal(true)}
@@ -460,6 +659,136 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                       创建
                     </Button>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* “上传到文件夹”弹窗 */}
+          {showFolderUploadModal && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50" onClick={closeFolderUploadModal}>
+              <div
+                className="w-full max-w-lg rounded-lg bg-surface-primary p-6 shadow-lg"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-text-primary">
+                    上传到“{folderUploadCategory}”文件夹
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={closeFolderUploadModal}
+                    className="rounded p-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                    aria-label="关闭"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div
+                  className={cn(
+                    'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition-colors',
+                    isFolderUploadDragOver
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border-light bg-surface-secondary',
+                  )}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsFolderUploadDragOver(true);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsFolderUploadDragOver(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsFolderUploadDragOver(false);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsFolderUploadDragOver(false);
+                    const dropped = Array.from(e.dataTransfer.files || []);
+                    if (dropped.length > 0) {
+                      setFolderUploadFiles((prev) => {
+                        const next = [...prev];
+                        for (const f of dropped) {
+                          const exists = next.some(
+                            (x) => x.name === f.name && x.size === f.size && x.lastModified === f.lastModified,
+                          );
+                          if (!exists) next.push(f);
+                        }
+                        return next;
+                      });
+                    }
+                  }}
+                >
+                  <p className="text-sm font-medium text-text-primary">拖拽文件到这里</p>
+                  <p className="mt-1 text-xs text-text-secondary">或点击下方按钮选择文件</p>
+
+                  <div className="mt-4 flex items-center gap-2">
+                    <input
+                      ref={folderUploadInputRef}
+                      type="file"
+                      className="hidden"
+                      multiple
+                      accept=".pdf,.doc,.docx,.txt,.md"
+                      onChange={handleFolderUploadChooseFiles}
+                      aria-label="选择要上传的文件"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => folderUploadInputRef.current?.click()}
+                      className="flex items-center gap-2"
+                    >
+                      <Upload className="h-4 w-4" />
+                      选择文件
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 max-h-40 overflow-auto rounded border border-border-light bg-surface-secondary p-3">
+                  {folderUploadFiles.length === 0 ? (
+                    <p className="text-xs text-text-secondary">尚未选择文件</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {folderUploadFiles.map((f) => (
+                        <div key={`${f.name}-${f.size}-${f.lastModified}`} className="flex items-center justify-between">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm text-text-primary">{f.name}</div>
+                            <div className="text-xs text-text-secondary">{(f.size / 1024).toFixed(2)} KB</div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setFolderUploadFiles((prev) =>
+                                prev.filter((x) => !(x.name === f.name && x.size === f.size && x.lastModified === f.lastModified)),
+                              )
+                            }
+                            className="text-red-500 hover:text-red-700"
+                            title="移除"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={closeFolderUploadModal}>
+                    取消
+                  </Button>
+                  <Button type="button" onClick={confirmFolderUpload} disabled={folderUploadFiles.length === 0}>
+                    确定上传
+                  </Button>
                 </div>
               </div>
             </div>
@@ -533,7 +862,7 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
           )}
 
           {/* 文件列表 */}
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 overflow-y-auto min-h-0">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Spinner className="h-6 w-6" />
@@ -553,7 +882,15 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                   return (
                     <div key={category} className="space-y-1">
                       {/* 分类文件夹头部 */}
-                      <div className="flex w-full items-center justify-between rounded-lg border border-border-light bg-surface-secondary p-3 hover:bg-surface-hover transition-colors">
+                      <div
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-lg border border-border-light bg-surface-secondary p-3 hover:bg-surface-hover transition-colors",
+                          dragOverCategory === category && "ring-2 ring-primary bg-primary/10 border-primary"
+                        )}
+                        onDragOver={(e) => handleFolderDragOver(e, category)}
+                        onDragLeave={handleFolderDragLeave}
+                        onDrop={(e) => handleFolderDrop(e, category)}
+                      >
                         <button
                           onClick={() => toggleCategory(category)}
                           className="flex flex-1 items-center gap-2"
@@ -636,12 +973,8 @@ export default function KnowledgeBaseFilesView({ open, onOpenChange }: { open: b
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                // 直接设置分类并触发文件选择
-                                setSelectedCategory(category);
-                                // 立即触发文件选择对话框
-                                setTimeout(() => {
-                                  fileInputRef.current?.click();
-                                }, 100);
+                                    // 打开“上传到文件夹”弹窗（不立即上传）
+                                    openFolderUploadModal(category);
                               }}
                               className="h-6 w-6 p-0 text-primary"
                               title="在此文件夹上传文件"
