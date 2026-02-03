@@ -19,12 +19,6 @@ mcpServers:
     chatMenu: false
     startup: false
     customUserVars: {}
-  DAT:
-    type: sse
-    url: http://0.0.0.0:8080/sse
-    chatMenu: false
-    startup: false
-    customUserVars: {}
 interface:
   customWelcome: 因为智能问数系统
   defaultEndpoint: deepseek
@@ -117,6 +111,17 @@ endpoints:
         fetch: false
       titleConvo: true
       modelDisplayLabel: ChatGPT
+    - name: dashscope
+      apiKey: ${DASHSCOPE_API_KEY}
+      baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
+      models:
+        default:
+          - deepseek-v3.2
+        fetch: false
+      titleConvo: true
+      modelDisplayLabel: dashscope
+      addParams:
+        disableStreaming: true
 memory:
   disabled: false
   validKeys:
@@ -146,4 +151,3 @@ memory:
       主动识别并存储重要信息，不要等待用户明确请求。但要确保存储的信息是有价值的、准确的，避免存储无关的临时对话内容。
     model_parameters:
       temperature: 0.1
-
