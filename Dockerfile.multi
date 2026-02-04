@@ -138,11 +138,9 @@ RUN npm run build
 FROM base-min AS api-build
 # Add `uv` for extended MCP support (required for MCP functionality)
 # 注意：Python、vips 和构建工具已在 base-min 阶段安装
-# 使用官方安装脚本安装 uv（Debian 推荐方式）
-# 安装脚本会将 uv 安装到 /root/.local/bin，需要创建软链接到 /usr/local/bin
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ln -s /root/.local/bin/uv /usr/local/bin/uv && \
-    ln -s /root/.local/bin/uvx /usr/local/bin/uvx && \
+# 使用 pip 安装 uv（避免 curl 从 GitHub 下载时的 HTTP/2 网络问题）
+# 配置 PyPI 镜像源以提升国内构建成功率，uvx 已包含在 uv 包中
+RUN pip3 install --no-cache-dir --break-system-packages -i https://pypi.tuna.tsinghua.edu.cn/simple uv && \
     uv --version && echo "✓ uv installed successfully"
 WORKDIR /app
 # Copy package files and agents-Aipyq dist before installing dependencies
