@@ -130,8 +130,7 @@
 5. **配置环境变量与配置文件**
    ```bash
    cp .env.example .env
-   # 本项目默认使用 Chizhou.yaml（无则从示例复制）
-   cp Aipyq.yaml.example Chizhou.yaml
+   cp Chizhou.yaml.example Chizhou.yaml
    # 按需编辑 .env 和 Chizhou.yaml
    # 本地开发时 .env 建议包含：
    # MONGO_URI=mongodb://localhost:27027/Chizhou
