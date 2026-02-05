@@ -90,136 +90,253 @@
 
 ### 方式一：本地直接运行（适合深入开发）
 
-1. **根目录安装依赖**
+#### 1. 克隆项目并进入目录
+
+```bash
+git clone https://github.com/constanji/chizhout.git
+cd chizhou
+```
+
+#### 2. 安装依赖
+
+```bash
+npm install
+```
+
+#### 3. 构建共享包
+
+```bash
+# 构建所有共享包（按顺序）
+npm run build:data-provider
+npm run build:data-schemas
+npm run build:api
+npm run build:client-package
+
+# 或者一次性构建所有包
+npm run build:packages
+```
+
+#### 4. 构建 Agent 包
+
+```bash
+cd agents-Aipyq
+npm install           # 首次建议跑一下
+npm run build:dev     # 生成 dist/esm 和 dist/cjs
+cd ..
+```
+
+#### 5. 构建前端
+
+> **注意**：后端以生产模式提供前端时必须先构建。
+
+```bash
+# 方式 A：根目录一键构建（推荐）
+npm run build:client
+
+# 方式 B：分步构建
+cd client
+npm run build
+cd ..
+```
+
+构建产物在 `client/dist/`，后端会读取其中的 `index.html`。若未构建就启动后端，会报错并提示先执行上述命令。
+
+#### 6. 配置环境变量与配置文件
+
+```bash
+cp .env.example .env
+cp Chizhou.yaml.example Chizhou.yaml
+```
+
+按需编辑 `.env` 和 `Chizhou.yaml`。本地开发时 `.env` 建议包含：
+
+```bash
+MONGO_URI=mongodb://localhost:27027/Chizhou
+MEILI_HOST=http://localhost:7700  # 若 SEARCH=true
+```
+
+**说明**：后端默认读取项目根目录的 `Chizhou.yaml`；若需改用其他路径，可设置环境变量 `CONFIG_PATH`。
+
+#### 7. 启动数据库服务（必须）
+
+> **重要**：本地跑后端时请用 `docker-compose.local-dev.yml`，不要用 `deploy-compose.yml`（deploy-compose 不把 MongoDB 映射到本机，本地进程连不上）。
+
+```bash
+# 启动所有服务（包括 Meilisearch）
+docker compose -f docker-compose.local-dev.yml up -d
+
+# 如果禁用了搜索（SEARCH=false），可以只启动 MongoDB 和 PostgreSQL：
+# docker compose -f docker-compose.local-dev.yml up -d mongodb vectordb
+
+# 查看服务状态（确认 mongodb 在 27027、meilisearch 在 7700）
+docker compose -f docker-compose.local-dev.yml ps
+
+# 查看日志（如果需要）
+docker compose -f docker-compose.local-dev.yml logs -f
+
+# 停止服务（开发完成后）
+# docker compose -f docker-compose.local-dev.yml down
+```
+
+**若后端报 `ECONNREFUSED 127.0.0.1:27017`：**
+- 确认用的是 `docker-compose.local-dev.yml` 且已 `up -d`
+- 确认 `.env` 中 `MONGO_URI=mongodb://localhost:27027/Chizhou`（端口与 compose 中映射一致）
+- 在**项目根目录**执行 `npm run backend:dev`
+
+#### 8. 启动后端（终端 1）
+
+```bash
+# 必须在项目根目录执行
+npm run backend:dev
+```
+
+#### 9. 启动前端（终端 2）
+
+```bash
+npm run frontend:dev
+```
+
+#### 10. 访问应用
+
+- **开发前端**：`http://localhost:3090`
+- **后端 API**：`http://localhost:3080`
+- **MongoDB**：`localhost:27027`（根据 .env 中的 MONGO_URI 配置）
+- **Meilisearch**：`http://localhost:7700`（如果 SEARCH=true）
+- **PostgreSQL 向量数据库**：`localhost:5234`（如果使用 RAG 功能）
+
+
+
+### 方式二：Docker 开发模式
+
+#### 1. 克隆项目并进入目录
+
+```bash
+git clone https://github.com/constanji/Aipyqchat.git
+cd Aipyqchat
+```
+
+#### 2. 配置环境变量
+
+```bash
+cp .env.example .env
+cp Chizhou.yaml.example Chizhou.yaml
+# 按需编辑 .env，配置数据库、密钥等
+```
+
+#### 3. 构建镜像并启动服务
+
+```bash
+# 第一次或修改 Dockerfile 后，先构建镜像
+docker-compose -f docker-compose.dev.yml build
+
+# 然后启动所有服务（前端、后端、MongoDB、Meilisearch 等）
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+#### 4. 访问应用
+
+- **前端（开发网关）**：`http://localhost:3090`
+- **后端 API**：`http://localhost:3080`
+
+#### 5. 查看 / 停止服务
+
+```bash
+# 查看日志
+docker-compose -f docker-compose.dev.yml logs -f
+
+# 停止服务
+docker-compose -f docker-compose.dev.yml down
+```
+
+### 方式三：Docker 生产环境部署（推荐）
+
+#### 前置要求
+
+- **Docker**：v20.10+
+- **Docker Compose**：v2.0+
+- **服务器内存**：建议 4GB+（RAG ONNX 模型需要约 500MB 内存）
+- **磁盘空间**：建议 10GB+（包含模型文件和依赖）
+
+#### 部署步骤
+
+1. **克隆项目到服务器**
+
    ```bash
-   npm install
-   ```
-
-
-2. **构建共享包**
-   ```bash
-    # 构建所有共享包（按顺序）
-    npm run build:data-provider
-    npm run build:data-schemas
-    npm run build:api
-    npm run build:client-package
-    
-    # 或者一次性构建所有包
-    npm run build:packages
-    ```
-    
-3. **构建Agent包**
-    ```bash
-    cd agents-Aipyq
-    npm install           # 首次建议跑一下
-    npm run build:dev     # 生成 dist/esm 和 dist/cjs
-    ```
-
-4. **构建前端（后端以生产模式提供前端时必须先构建）**
-   ```bash
-   # 方式 A：根目录一键构建（推荐）
-   npm run build:client
-   
-   # 方式 B：分步构建
-   cd client
-   npm run build
-   cd ..
-   ```
-   构建产物在 `client/dist/`，后端会读取其中的 `index.html`。若未构建就启动后端，会报错并提示先执行上述命令。
-
-5. **配置环境变量与配置文件**
-   ```bash
-   cp .env.example .env
-   cp Chizhou.yaml.example Chizhou.yaml
-   # 按需编辑 .env 和 Chizhou.yaml
-   # 本地开发时 .env 建议包含：
-   # MONGO_URI=mongodb://localhost:27027/Chizhou
-   # MEILI_HOST=http://localhost:7700（若 SEARCH=true）
-   ```
-   **说明**：后端默认读取项目根目录的 `Chizhou.yaml`；若需改用其他路径，可设置环境变量 `CONFIG_PATH`。
-
-6. **启动数据库服务（必须）**
-   ```bash
-   # 注意：本地跑后端时请用 docker-compose.local-dev.yml，不要用 deploy-compose.yml
-   # （deploy-compose 不把 MongoDB 映射到本机，本地进程连不上）
-   
-   # 启动所有服务（包括 Meilisearch）
-   docker compose -f docker-compose.local-dev.yml up -d
-   
-   # 如果禁用了搜索（SEARCH=false），可以只启动 MongoDB 和 PostgreSQL：
-   # docker compose -f docker-compose.local-dev.yml up -d mongodb vectordb
-   
-   # 查看服务状态（确认 mongodb 在 27027、meilisearch 在 7700）
-   docker compose -f docker-compose.local-dev.yml ps
-   
-   # 查看日志（如果需要）
-   docker compose -f docker-compose.local-dev.yml logs -f
-   
-   # 停止服务（开发完成后）
-   # docker compose -f docker-compose.local-dev.yml down
-   ```
-   
-   **若后端报 `ECONNREFUSED 127.0.0.1:27017`：**
-   - 确认用的是 `docker-compose.local-dev.yml` 且已 `up -d`
-   - 确认 `.env` 中 `MONGO_URI=mongodb://localhost:27027/Chizhou`（端口与 compose 中映射一致）
-   - 在**项目根目录**执行 `npm run backend:dev`（不要进 api/ 再跑）
-
-7. **启动后端（终端 1）**
-   ```bash
-   # 必须在项目根目录执行
-   npm run backend:dev
-   ```
-
-8. **启动前端（终端 2）**
-   ```bash
-   npm run frontend:dev
-   ```
-
-9. **默认访问地址**
-   - 开发前端：`http://localhost:3090`
-   - 后端 API：`http://localhost:3080`
-   - MongoDB：`localhost:27027`（根据 .env 中的 MONGO_URI 配置）
-   - Meilisearch：`http://localhost:7700`（如果 SEARCH=true）
-   - PostgreSQL 向量数据库：`localhost:5234`（如果使用 RAG 功能）
-
-
-
-### 方式二：Docker 开发模式（测试版）
-
-1. **克隆项目并进入目录**
-   ```bash
-   git clone https://github.com/constanji/Aipyqchat
-   cd AipyqChat
+   git clone https://github.com/constanji/chizhou.git
+   cd Aipyqchat
    ```
 
 2. **配置环境变量**
+
    ```bash
+   # 复制环境变量模板
    cp .env.example .env
-   cp Aipyq.yaml.example Aipyq.yaml
-   ```
-
-3. **构建镜像并启动服务**
-   ```bash
-   # 第一次或修改 Dockerfile 后，先构建镜像
-   docker-compose -f docker-compose.dev.yml build
-   #docker-compose.dev.yml也可以选择生成环境的docker-compose.yml
-   # 然后启动所有服务（前端、后端、MongoDB、Meilisearch 等）
-   docker-compose -f docker-compose.dev.yml up -d
-   ```
-
-4. **访问应用**
-   - 前端（开发网关）：`http://localhost:3090`
-   - 后端 API：`http://localhost:3080`
-
-5. **查看 / 停止服务**
-   ```bash
-   # 查看日志
-   docker-compose -f docker-compose.dev.yml logs -f
-
-   # 停止服务
-   docker-compose -f docker-compose.dev.yml down
-   ```
+   cp Chizhou.yaml.example Chizhou.yaml
    
+   # 编辑 .env 文件，配置必要的环境变量
+   # 特别注意以下配置：
+   # - MONGO_URI: MongoDB 连接字符串
+   # - MEILI_MASTER_KEY: Meilisearch 主密钥
+   # - 各种 API 密钥（OpenAI、Anthropic 等）
+   # - USE_ONNX_EMBEDDING: 是否使用 ONNX 嵌入模型（默认 true）
+   nano .env
+   ```
+
+3. **构建 Docker 镜像**
+
+   ```bash
+   # 方式 A：使用标准 Dockerfile（单阶段构建）
+   docker build -t chizhou:latest -f Dockerfile .
+   
+   # 方式 B：使用多阶段构建 Dockerfile（推荐，构建更快）
+   docker build -t chizhou:latest -f Dockerfile.multi .
+   ```
+
+4. **配置 docker-compose.yml**
+
+   编辑 `deploy-compose.yml`，确保以下配置正确：
+   - **端口映射**：根据服务器实际情况调整端口映射
+   - **镜像名称**：如果使用自定义镜像，修改 `image` 字段
+   - **环境变量**：确保 `.env` 文件中的变量正确传递
+
+5. **启动所有服务**
+
+   ```bash
+   # 启动所有服务（API、MongoDB、Meilisearch、VectorDB）
+   docker-compose -f deploy-compose.yml up -d
+   
+   # 查看服务状态
+   docker-compose -f deploy-compose.yml ps
+   
+   # 查看日志
+   docker-compose -f deploy-compose.yml logs -f
+   ```
+
+6. **验证部署**
+
+   ```bash
+   # 检查 API 服务是否正常
+   curl http://localhost:3080/api/health
+   
+   # 检查 MongoDB
+   docker-compose -f deploy-compose.yml exec mongodb mongosh --eval "db.version()"
+   
+   # 检查 Meilisearch
+   curl http://localhost:7700/health
+   ```
+
+7. **访问应用**
+
+   - **前端访问**：`http://your-server-ip:3080`
+   - **API 端点**：`http://your-server-ip:3080/api`
+
+
+
+
+
+
+
+
 
 ---
 
